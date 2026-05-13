@@ -314,99 +314,99 @@
 
 ### 5.1 Dashboard Subscriber
 - [x] **5.1.1** Dashboard widgets (3 quota cards, lanjut belajar, akses cepat) (F9)
-- [ ] **5.1.2** Recharts integration — TBD (basic dashboard uses plain progress bars)
+- [x] **5.1.2** Recharts integration — UsageChart on /billing/usage (P5-8)
 
 ### 5.2 Figures (1-Page CRUD Pattern)
 - [x] **5.2.1** `/figures` list dengan filter & search (F10)
 - [x] **5.2.2** `/figures/[slug]` detail dengan tabs (F10 — Biografi/Timeline/Peta/Hubungan/Hadits/Sumber)
 - [x] **5.2.3** ListDetailShell template (F10)
-- [ ] **5.2.4** Back navigation pattern
-- [ ] **5.2.5** Modal pattern (`?modal=create|edit`)
-- [ ] **5.2.6** Citation popover (hover/click)
-- [ ] **5.2.7** Hubungan tab dengan vis-network
-- [ ] **5.2.8** Hadits tab dengan link external
+- [x] **5.2.4** Back navigation pattern with filter preservation (F10)
+- [~] **5.2.5** Modal pattern (`?modal=create|edit`) — admin actions TBD; subscribers don't edit figures
+- [~] **5.2.6** Citation popover — basic citation chip exists; popover detail TBD
+- [~] **5.2.7** Hubungan tab — currently stub; vis-network integration TBD
+- [~] **5.2.8** Hadits tab — count + link stub; sunnah.com integration TBD
 
 ### 5.3 Timeline Komponen
-- [ ] **5.3.1** Install vis-timeline-react
-- [ ] **5.3.2** TimelineSingle (react-chrono) untuk biografi tokoh
-- [ ] **5.3.3** TimelineComparison (vis-timeline) `/timeline`
-- [ ] **5.3.4** Lazy-load dropdown bertingkat
-- [ ] **5.3.5** TimelineUlamaSalafPlus (visx + D3 force) `/timeline-ulama`
+- [x] **5.3.1** Install vis-timeline + react-chrono (Phase 5 dep install)
+- [x] **5.3.2** TimelineSingle (react-chrono) — VERTICAL_ALTERNATING mode, dual-cal (P5-1)
+- [x] **5.3.3** TimelineComparison (vis-timeline) `/timeline` (P5-2)
+- [x] **5.3.4** Cascading lazy-load dropdown (sahabat→tabi'in→tabi'ut) (P5-2)
+- [x] **5.3.5** TimelineUlamaSalafPlus `/timeline-ulama` — multi-generation lanes with filters (P5-2)
 
 ### 5.4 Maps
-- [ ] **5.4.1** Install MapLibre GL + react-map-gl
-- [ ] **5.4.2** MapAll `/map` dengan layer toggle
-- [ ] **5.4.3** Clustering & heatmap
-- [ ] **5.4.4** Dark/light tile switching
-- [ ] **5.4.5** MapSingleFigure (embed)
-- [ ] **5.4.6** Battle map dengan phase slider `/battles/[slug]`
-- [ ] **5.4.7** Animated arrows overlay
-- [ ] **5.4.8** Hijrah route animation (Mekkah → Madinah)
+- [x] **5.4.1** MapLibre GL + react-map-gl installed (Phase 5 dep)
+- [x] **5.4.2** MapAll `/map` dengan layer toggle (P5-3)
+- [x] **5.4.3** Clustering (P5-3 — MapLibre cluster source)
+- [x] **5.4.4** Dark/light tile switching (CARTO basemap, MutationObserver watching data-theme) (P5-3)
+- [~] **5.4.5** MapSingleFigure (embed) — figure-marker component built; embedded usage in FigureDetail TBD
+- [x] **5.4.6** Battle map dengan phase slider `/battles/[slug]` (P5-4)
+- [x] **5.4.7** Animated arrows overlay (Framer Motion SVG) (P5-4)
+- [x] **5.4.8** Hijrah route animation (GeoJSON LineString) (P5-3)
 
 ### 5.5 Battles
-- [ ] **5.5.1** `/battles` list
-- [ ] **5.5.2** `/battles/[slug]` detail dengan tab Narasi/Peta/Tokoh/Fase/Sumber
+- [x] **5.5.1** `/battles` list with filters (P5-4)
+- [x] **5.5.2** `/battles/[slug]` detail dengan tab Narasi/Peta/Tokoh/Fase/Sumber (P5-4)
 
 ### 5.6 Quiz
-- [ ] **5.6.1** `/quiz` list & start
-- [ ] **5.6.2** Quiz session UI + timer
-- [ ] **5.6.3** Result screen + review
+- [x] **5.6.1** `/quiz` list & start (P5-5)
+- [x] **5.6.2** Quiz session UI + timer auto-submit (P5-5)
+- [x] **5.6.3** Result screen + confetti + review (P5-5)
 
 ### 5.7 AI Chat
-- [ ] **5.7.1** `/chat` dengan useChat hook
-- [ ] **5.7.2** Conversation history sidebar
-- [ ] **5.7.3** Citation parser & link to figures
-- [ ] **5.7.4** Quota warning toast
+- [x] **5.7.1** `/chat` dengan useChat hook (Vercel AI SDK streaming) (P5-6)
+- [x] **5.7.2** Conversation history sidebar (localStorage persistence) (P5-6)
+- [x] **5.7.3** Citation parser & link to figures (URL regex extraction) (P5-6)
+- [x] **5.7.4** Quota warning toast (Sonner) (P5-6)
 
 ### 5.8 PDF Builder
-- [ ] **5.8.1** `/pdf-builder` multi-step form
-- [ ] **5.8.2** MultiSelect tokoh (combobox)
-- [ ] **5.8.3** Template picker dengan preview
-- [ ] **5.8.4** Live preview iframe
-- [ ] **5.8.5** Auto-generate judul via AI
-- [ ] **5.8.6** Generate → loading → download
+- [x] **5.8.1** `/pdf-builder` 4-step wizard form (P5-7)
+- [x] **5.8.2** MultiSelect tokoh (search + chips, 2-60 enforced) (P5-7)
+- [x] **5.8.3** Template picker dengan preview SVG placeholders (P5-7)
+- [~] **5.8.4** Live preview iframe — TBD (cover preview component exists; full doc preview later)
+- [~] **5.8.5** Auto-generate judul via AI — client-side placeholder (no AI title endpoint yet) (P5-7)
+- [x] **5.8.6** Generate → idempotent submit → /jobs polling status → download (P5-7)
 
 ### 5.9 Settings & Billing
-- [ ] **5.9.1** `/settings` tabs (Profile, Preferences, Subscription, Security)
-- [ ] **5.9.2** `/billing/usage` AI credit history dengan chart
-- [ ] **5.9.3** `/billing/payment` upload bukti
+- [x] **5.9.1** `/settings` 4 tabs (Profile/Preferences/Subscription/Security) (P5-8)
+- [x] **5.9.2** `/billing/usage` AI credit history dengan Recharts chart (P5-8)
+- [x] **5.9.3** `/billing/payment` upload bukti pembayaran (P5-8)
 
 ### 5.10 Notifications & Pricing
-- [ ] **5.10.1** `/notifications` panel
-- [ ] **5.10.2** Bell dropdown realtime SSE
-- [ ] **5.10.3** `/pricing` page dengan tier cards
+- [x] **5.10.1** `/notifications` panel (P5-9)
+- [x] **5.10.2** Bell dropdown + SSE/30s polling realtime (F5 + P5-9)
+- [x] **5.10.3** `/pricing` page dengan tier cards + bulanan/tahunan toggle (F9)
 
-**Exit criteria**: subscriber bisa browsing figures, timeline, peta, generate PDF.
+**Exit criteria**: subscriber bisa browsing figures, timeline, peta, generate PDF. ✅
 
 ---
 
 ## Phase 6 — Frontend Admin & Reviewer
 
 ### 6.1 Admin Panel
-- [ ] **6.1.1** Admin dashboard
-- [ ] **6.1.2** Users management dengan invite, edit role, suspend
-- [ ] **6.1.3** Roles & Permissions matrix
-- [ ] **6.1.4** Menu matrix
-- [ ] **6.1.5** AI Providers management
-- [ ] **6.1.6** AI Models management
-- [ ] **6.1.7** AI Role Assignment
-- [ ] **6.1.8** Fonts management (lihat IDEAS §3b.4)
-- [ ] **6.1.9** Whitelist domains management
-- [ ] **6.1.10** Subscriptions & Payments approval
-- [ ] **6.1.11** Audit log viewer dengan diff modal
-- [ ] **6.1.12** Trash view per type (figures, battles, dll)
+- [x] **6.1.1** Admin dashboard /admin/dashboard with 6 metric cards + quick actions (A1)
+- [x] **6.1.2** Users management /admin/users (CRUD, invite, edit roles, suspend) (A2)
+- [x] **6.1.3** Roles & Permissions matrix /admin/roles (Tabs: matrix + manage) (A3)
+- [x] **6.1.4** Menu access matrix /admin/menus (tree view + per-role switch grid) (A4)
+- [x] **6.1.5** AI Providers management (provider list with enable/test/rotate) (A5)
+- [x] **6.1.6** AI Models management (grouped table, prices, capabilities) (A5)
+- [x] **6.1.7** AI Role Assignment (5 roles → model select) (A5)
+- [x] **6.1.8** Fonts management /admin/fonts (active slots panel + all fonts + add font dialog) (A6)
+- [x] **6.1.9** Whitelist domains management /admin/whitelist (A7)
+- [x] **6.1.10** Subscriptions & Payments approval (1-click approve with auto-suggest tier) (A8)
+- [x] **6.1.11** Audit log viewer /admin/audit-logs + diff modal with react-diff-viewer (A9)
+- [x] **6.1.12** Trash view /admin/trash + per-type pages with bulk restore/hard delete (A10)
 
 ### 6.2 Reviewer Panel
-- [ ] **6.2.1** Review queue dengan filter
-- [ ] **6.2.2** Side-by-side review UI
-- [ ] **6.2.3** Live source fetch (iframe sandbox atau server-fetch)
-- [ ] **6.2.4** Citation highlight & jump
-- [ ] **6.2.5** Approve / Request Edit / Reject flows
-- [ ] **6.2.6** AI-assisted edit modal
-- [ ] **6.2.7** Diff viewer (react-diff-viewer)
-- [ ] **6.2.8** Revisi history per content
+- [x] **6.2.1** Review queue dengan filter (P5-10)
+- [x] **6.2.2** Side-by-side review UI (P5-10)
+- [x] **6.2.3** Live source fetch (iframe sandbox + fallback) (P5-10)
+- [x] **6.2.4** Citation highlight & jump (P5-10)
+- [x] **6.2.5** Approve / Request Edit / Reject flows (P5-10)
+- [x] **6.2.6** AI-assisted edit modal (SweetAlert + API call) (P5-10)
+- [x] **6.2.7** Diff viewer (react-diff-viewer-continued) (P5-10)
+- [ ] **6.2.8** Revisi history per content (UI page TBD — backend has content_revisions table ready)
 
-**Exit criteria**: reviewer bisa review konten end-to-end, admin bisa kelola semua resource.
+**Exit criteria**: reviewer bisa review konten end-to-end, admin bisa kelola semua resource. ✅
 
 ---
 
