@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+
+/* ─────────────────────────────────────────────────────────────────
+   Athar — Emerald Turats design tokens.
+   See BRANDING.md §4 (light) & §4b (dark).
+   ───────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Fonts (dynamically swappable via CSS vars from /api/v1/public/theme/fonts) */
+  --font-display-latin: var(--font-playfair, ui-serif), Georgia, serif;
+  --font-body-latin: var(--font-inter, ui-sans-serif), system-ui, sans-serif;
+  --font-display-arab: var(--font-amiri, 'Amiri'), 'Scheherazade New', serif;
+  --font-section-arab: var(--font-reem-kufi, 'Reem Kufi'), 'Cairo', sans-serif;
+  --font-body-arab: var(--font-cairo, 'Cairo'), 'Tajawal', sans-serif;
+  --font-quran-arab: var(--font-amiri, 'Amiri'), 'Scheherazade New', serif;
+  --font-mono: var(--font-jetbrains-mono, ui-monospace), monospace;
+}
+
+/* ─── Light Mode (Emerald Turats) ───────────────────────────────── */
+:root,
+:root[data-theme='light'] {
+  --bg: 250 245 235;             /* #FAF5EB */
+  --bg-elevated: 242 235 217;    /* #F2EBD9 */
+  --surface: 250 245 235;
+  --primary: 15 76 58;           /* #0F4C3A — emerald */
+  --primary-foreground: 250 245 235;
+  --accent: 184 153 104;         /* #B89968 — antique gold */
+  --accent-foreground: 31 24 16;
+  --text: 31 24 16;              /* #1F1810 */
+  --text-muted: 107 94 77;       /* #6B5E4D */
+  --text-faint: 168 154 133;     /* #A89A85 */
+  --border: 232 223 200;         /* #E8DFC8 */
+  --ring: 184 153 104;
+
+  --success: 46 125 82;
+  --warning: 198 138 46;
+  --danger: 168 65 46;
+  --info: 58 95 138;
+
+  --sidebar-icon: 107 94 77;
+  --sidebar-icon-active: 184 153 104;
+}
+
+/* ─── Dark Mode (Emerald Turats Night) ──────────────────────────── */
+:root[data-theme='dark'] {
+  --bg: 15 13 10;                /* #0F0D0A — warm black */
+  --bg-elevated: 31 24 16;       /* #1F1810 */
+  --surface: 42 34 24;           /* #2A2218 */
+  --primary: 74 188 149;         /* #4ABC95 — emerald bright */
+  --primary-foreground: 15 13 10;
+  --accent: 212 183 131;         /* #D4B783 — gold warm */
+  --accent-foreground: 15 13 10;
+  --text: 250 245 235;           /* #FAF5EB */
+  --text-muted: 201 191 171;     /* #C9BFAB */
+  --text-faint: 138 127 109;     /* #8A7F6D */
+  --border: 42 34 24;
+  --ring: 212 183 131;
+
+  --success: 93 199 154;
+  --warning: 224 178 94;
+  --danger: 217 117 94;
+  --info: 106 143 190;
+
+  --sidebar-icon: 201 191 171;
+  --sidebar-icon-active: 212 183 131;
+}
+
+/* ─── Base ──────────────────────────────────────────────────────── */
+@layer base {
+  * {
+    border-color: rgb(var(--border));
+  }
+
+  html {
+    color-scheme: light dark;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: rgb(var(--bg));
+    color: rgb(var(--text));
+    font-family: var(--font-body-latin);
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+  }
+
+  /* Arabic text rules — see UI_UX.md §6 */
+  [lang='ar'],
+  [dir='rtl'] {
+    font-family: var(--font-body-arab);
+    line-height: 1.8;
+    letter-spacing: 0;
+  }
+
+  ::selection {
+    background-color: rgb(var(--accent) / 0.3);
+    color: rgb(var(--text));
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

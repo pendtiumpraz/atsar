@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./*"],
+      "@athar/db": ["../../packages/db/src"],
+      "@athar/ai": ["../../packages/ai/src"],
+      "@athar/ui": ["../../packages/ui/src"],
+      "@athar/shared": ["../../packages/shared/src"],
+      "@athar/hijri": ["../../packages/hijri/src"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next", ".turbo"]
+}

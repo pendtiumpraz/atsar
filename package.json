@@ -1,0 +1,34 @@
+{
+  "name": "athar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Athar — Jejak generasi terbaik, dalam genggamanmu.",
+  "packageManager": "pnpm@11.1.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
+    "db:generate": "pnpm --filter @athar/db generate",
+    "db:migrate": "pnpm --filter @athar/db migrate",
+    "db:seed": "pnpm --filter @athar/db seed",
+    "db:seed:dev": "pnpm --filter @athar/db seed:dev",
+    "db:reset": "pnpm --filter @athar/db reset",
+    "db:studio": "pnpm --filter @athar/db studio",
+    "db:check": "pnpm --filter @athar/db check",
+    "clean": "turbo run clean && rm -rf node_modules .turbo"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3",
+    "prettier": "^3.4.1",
+    "prettier-plugin-tailwindcss": "^0.6.9",
+    "@types/node": "^22.10.0"
+  }
+}

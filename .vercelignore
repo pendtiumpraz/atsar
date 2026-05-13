@@ -1,0 +1,11 @@
+.env*
+!.env.example
+apps/worker
+docs
+*.md
+!README.md
+.github
+.vscode
+storage
+uploads
+generated

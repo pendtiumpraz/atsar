@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Allow native build scripts. We deploy to Vercel:
+# - puppeteer: false (replaced by @sparticuz/chromium on Vercel)
+# - msgpackr-extract: false (BullMQ dep — we use QStash)
+# - sharp: true (Next.js image optimization)
+# - esbuild, unrs-resolver: true (dev tools)
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: false
+  puppeteer: false
+  sharp: true
+  unrs-resolver: true

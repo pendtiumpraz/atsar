@@ -1,0 +1,12 @@
+node_modules
+.next
+.turbo
+dist
+coverage
+pnpm-lock.yaml
+*.log
+storage
+uploads
+generated
+public/fonts
+.env*

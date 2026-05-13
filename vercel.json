@@ -1,0 +1,28 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "pnpm turbo run build --filter=@athar/web",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "framework": "nextjs",
+  "regions": ["sin1"],
+  "functions": {
+    "apps/web/app/api/v1/ai/chat/route.ts": {
+      "maxDuration": 60
+    },
+    "apps/web/app/api/jobs/research/route.ts": {
+      "maxDuration": 300
+    },
+    "apps/web/app/api/jobs/pdf/route.ts": {
+      "maxDuration": 300
+    },
+    "apps/web/app/api/jobs/doc-analyze/route.ts": {
+      "maxDuration": 300
+    },
+    "apps/web/app/api/jobs/extract/route.ts": {
+      "maxDuration": 120
+    },
+    "apps/web/app/api/jobs/cron/**/route.ts": {
+      "maxDuration": 60
+    }
+  },
+  "crons": []
+}
