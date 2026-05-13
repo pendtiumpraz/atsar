@@ -136,6 +136,33 @@ async function main() {
     console.warn('  trigger:', e instanceof Error ? e.message : String(e))
   }
 
+  // ─── Materialized view: ai_usage_monthly_summary ──────────────────
+  // Spec: docs/DATABASE.md §8.6. Refreshed hourly via QStash
+  // (`/api/jobs/cron/refresh-mv`). The unique index is required so we can
+  // use `REFRESH MATERIALIZED VIEW CONCURRENTLY` and avoid blocking reads.
+  try {
+    await sql.unsafe(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS ai_usage_monthly_summary AS
+      SELECT
+        user_id,
+        date_trunc('month', created_at) AS period,
+        role,
+        SUM(credits_used) AS total_credits,
+        SUM(input_tokens) AS total_input,
+        SUM(output_tokens) AS total_output,
+        COUNT(*) AS total_calls
+      FROM ai_usage_logs
+      GROUP BY user_id, period, role
+    `)
+    await sql.unsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ai_usage_monthly_summary_pk
+        ON ai_usage_monthly_summary (user_id, period, role)
+    `)
+    console.log('✓ ai_usage_monthly_summary materialized view')
+  } catch (e) {
+    console.warn('  mv:', e instanceof Error ? e.message : String(e))
+  }
+
   await sql.end()
   console.log('\nPost-migrate complete.')
 }

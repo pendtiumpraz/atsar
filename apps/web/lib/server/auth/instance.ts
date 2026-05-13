@@ -1,15 +1,17 @@
 // Better-auth runtime instance.
 //
-// Wires our Drizzle DB + plural table schema (users, sessions, …) into
-// better-auth's drizzle adapter. Field mappings translate between
-// better-auth's canonical names (e.g. `name`, `image`) and our column
-// names (`full_name`, `avatar_url`).
+// Wires our Drizzle DB + plural table schema (users, sessions, accounts,
+// verifications, …) into better-auth's drizzle adapter. Field mappings
+// translate between better-auth's canonical names (e.g. `name`, `image`)
+// and our column names (`full_name`, `avatar_url`).
 //
-// Note on the password column: better-auth normally stores the password
-// hash on a separate `accounts` table. Our existing schema keeps the
-// hash on `users.passwordHash`. The dedicated `accounts` table will be
-// added in a follow-up migration; until then password-credential flows
-// that require an `accounts` row will need that migration to be applied.
+// Schema notes:
+//   - `users.emailVerified` (boolean) is the field better-auth reads;
+//     `users.emailVerifiedAt` (timestamp) is preserved alongside for audit.
+//   - `accounts` holds password hashes for the credential provider and
+//     OAuth tokens for social providers (one row per linked identity).
+//   - `verifications` stores email-verification / magic-link / reset
+//     tokens used by better-auth internally.
 //
 // API reference: https://www.better-auth.com/docs
 
@@ -42,19 +44,15 @@ export const auth = betterAuth({
   emailAndPassword: authConfig.emailAndPassword,
   advanced: authConfig.advanced,
 
-  // Map better-auth's canonical user fields onto our existing columns.
-  // Mismatches we cannot trivially bridge here:
-  //   - better-auth `emailVerified: boolean` vs our `email_verified_at` (timestamp).
-  //     The boolean column is referenced by better-auth internals; a future
-  //     migration will add it (or replace with a generated column) alongside
-  //     the timestamp we currently keep for audit purposes.
-  //   - `password` is held by better-auth's `accounts` table (not present
-  //     in our schema yet). See note at top of file.
+  // Map better-auth's canonical fields onto our column names. All four
+  // tables better-auth touches (users, sessions, accounts, verifications)
+  // are listed so the adapter can resolve snake_case columns.
   user: {
     modelName: 'users',
     fields: {
       name: 'full_name',
       image: 'avatar_url',
+      emailVerified: 'email_verified',
       createdAt: 'created_at',
       updatedAt: 'updated_at',
     },
@@ -70,8 +68,30 @@ export const auth = betterAuth({
       ipAddress: 'ip_address',
       userAgent: 'user_agent',
       createdAt: 'created_at',
-      // No `updated_at` column on `sessions` — a follow-up migration will
-      // add it. Until then better-auth will treat it as missing.
+      updatedAt: 'updated_at',
+    },
+  },
+  account: {
+    modelName: 'accounts',
+    fields: {
+      userId: 'user_id',
+      accountId: 'account_id',
+      providerId: 'provider_id',
+      accessToken: 'access_token',
+      refreshToken: 'refresh_token',
+      idToken: 'id_token',
+      accessTokenExpiresAt: 'access_token_expires_at',
+      refreshTokenExpiresAt: 'refresh_token_expires_at',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at',
+    },
+  },
+  verification: {
+    modelName: 'verifications',
+    fields: {
+      expiresAt: 'expires_at',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at',
     },
   },
 

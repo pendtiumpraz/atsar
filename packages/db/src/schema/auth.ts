@@ -23,7 +23,10 @@ export const users = pgTable(
     ...baseColumns,
     email: text('email').notNull().unique(),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
-    passwordHash: text('password_hash'), // argon2id
+    // Better-auth expects a boolean `emailVerified` field; keep
+    // `emailVerifiedAt` (timestamp) alongside for audit purposes.
+    emailVerified: boolean('email_verified').notNull().default(false),
+    passwordHash: text('password_hash'), // argon2id (legacy; better-auth uses accounts.password)
     fullName: text('full_name').notNull(),
     displayName: text('display_name'),
     avatarUrl: text('avatar_url'),
@@ -165,11 +168,62 @@ export const sessions = pgTable(
     userAgent: text('user_agent'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Better-auth expects an `updatedAt` column on sessions for session refresh.
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('sessions_user_idx').on(t.userId),
     index('sessions_expires_idx').on(t.expiresAt),
   ],
+)
+
+// ─── accounts ──────────────────────────────────────────────────────
+// Better-auth credential / OAuth storage. One row per (provider, account).
+// For email/password the row carries the hashed password; for OAuth it
+// holds the provider tokens. Keeping this as a separate table allows a
+// single user to link multiple providers.
+export const accounts = pgTable(
+  'accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(), // 'email' | google sub | ...
+    providerId: text('provider_id').notNull(), // 'credential' | 'google' | 'magic-link'
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    scope: text('scope'),
+    password: text('password'), // better-auth hashes via its bcrypt
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('accounts_user_idx').on(t.userId),
+    uniqueIndex('accounts_provider_account_idx').on(t.providerId, t.accountId),
+  ],
+)
+
+// ─── verifications ─────────────────────────────────────────────────
+// Better-auth's generic verification token store (email verification,
+// magic links, password reset). Kept in parallel with our existing
+// `email_verification_tokens` / `password_reset_tokens` tables — those
+// remain authoritative for legacy code paths; this is what better-auth's
+// adapter looks for by default.
+export const verifications = pgTable(
+  'verifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identifier: text('identifier').notNull(), // email or magic-link token
+    value: text('value').notNull(), // the verification value
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('verifications_identifier_idx').on(t.identifier)],
 )
 
 // ─── password_reset_tokens ─────────────────────────────────────────

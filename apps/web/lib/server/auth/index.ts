@@ -9,3 +9,9 @@ export type { Auth, Session } from './instance.js'
 
 export { authConfig } from './config.js'
 export type { AuthConfig } from './config.js'
+
+export {
+  requireActiveSubscription,
+  getActiveSubscription,
+} from './subscription-gate.js'
+export type { ActiveSubscription } from './subscription-gate.js'
