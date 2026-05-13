@@ -1,36 +1,52 @@
-// Marketing map spoiler — a stylized SVG region map showing iconic locations
-// from the era of Rasulullah ﷺ through the salaf. Pure SVG, no MapLibre,
-// no network requests — keeps landing performance crisp. Real interactive
-// map at /map post-login.
+// Marketing map spoiler — section heading + intro + a REAL interactive MapLibre
+// canvas. The canvas itself lives in a sibling client component
+// (`./map-spoiler-interactive`) loaded via `next/dynamic({ ssr: false })`
+// because MapLibre touches `window` at module load.
+//
+// What this server component owns:
+//   - Section chrome (border, padding, heading, intro copy).
+//   - The legend (color swatches for the historical regions) — rendered in the
+//     server tree so it ships as plain HTML even before the map JS arrives.
+//   - The dynamic import + skeleton placeholder.
+//
+// The interactive map shows:
+//   - CARTO Voyager (light) / Dark Matter (dark) raster basemap, theme-aware.
+//   - Translucent polygons for Hijaz / Najd / Yemen / Syam / Iraq / Misr /
+//     Khurasan / Andalusia / Maghrib with inline labels.
+//   - 15 city pins with hover/click popup.
+//   - Hijrah route Mekkah → Madinah (dashed).
+//   - Zoom + scale controls; users can zoom out to the world to compare with
+//     modern geography.
 
-type SpoilerLocation = {
-  id: string
-  nameId: string
-  nameAr: string
-  // Approximate position in SVG-space (viewBox 0 0 800 480),
-  // hand-tuned to read as "the Middle East" without being a real geo projection.
-  cx: number
-  cy: number
-  note?: string
-}
+import dynamic from 'next/dynamic'
 
-const LOCATIONS: ReadonlyArray<SpoilerLocation> = [
-  { id: 'makkah', nameId: 'Mekkah', nameAr: 'مكة', cx: 360, cy: 320, note: 'Kelahiran Nabi ﷺ' },
-  { id: 'madinah', nameId: 'Madinah', nameAr: 'المدينة', cx: 372, cy: 282 },
-  { id: 'badr', nameId: 'Badar', nameAr: 'بدر', cx: 338, cy: 290, note: 'Perang Badar' },
-  { id: 'al-quds', nameId: 'Al-Quds', nameAr: 'القدس', cx: 305, cy: 222 },
-  { id: 'damascus', nameId: 'Damaskus', nameAr: 'دمشق', cx: 330, cy: 198 },
-  { id: 'yarmuk', nameId: 'Yarmuk', nameAr: 'اليرموك', cx: 318, cy: 213, note: 'Perang Yarmuk' },
-  { id: 'baghdad', nameId: 'Baghdad', nameAr: 'بغداد', cx: 432, cy: 210 },
-  { id: 'kufah', nameId: 'Kufah', nameAr: 'الكوفة', cx: 420, cy: 220 },
-  { id: 'bashrah', nameId: 'Bashrah', nameAr: 'البصرة', cx: 460, cy: 250 },
-  { id: 'qadisiyyah', nameId: 'Qadisiyyah', nameAr: 'القادسية', cx: 416, cy: 232 },
-  { id: 'bukhara', nameId: 'Bukhara', nameAr: 'بخارى', cx: 612, cy: 158, note: 'Imam Bukhari' },
-  { id: 'naysabur', nameId: 'Naysabur', nameAr: 'نيسابور', cx: 552, cy: 192, note: 'Imam Muslim' },
-  { id: 'fustat', nameId: 'Fustat', nameAr: 'الفسطاط', cx: 240, cy: 280 },
-  { id: 'cordoba', nameId: 'Cordoba', nameAr: 'قرطبة', cx: 50, cy: 200 },
-  { id: 'shanaa', nameId: "Shan'a", nameAr: 'صنعاء', cx: 410, cy: 400 },
+// Region label/color metadata for the legend. Must stay in sync with the
+// `REGIONS` array in `./map-spoiler-interactive`. Kept duplicated (rather than
+// re-exported) so the server bundle does not pull the maplibre import chain.
+const LEGEND_REGIONS: ReadonlyArray<{ label: string; color: string }> = [
+  { label: 'Hijaz', color: '#10b981' },
+  { label: 'Najd', color: '#f59e0b' },
+  { label: 'Yaman', color: '#ef4444' },
+  { label: 'Syam', color: '#8b5cf6' },
+  { label: 'Iraq', color: '#0ea5e9' },
+  { label: 'Misr', color: '#d97706' },
+  { label: 'Khurasan', color: '#14b8a6' },
+  { label: 'Andalusia', color: '#ec4899' },
+  { label: 'Maghrib', color: '#84cc16' },
 ]
+
+// Lazy-load the client map. `ssr: false` is required because MapLibre touches
+// `window` synchronously at module load. The skeleton matches the map's final
+// height so the layout doesn't shift when JS hydrates.
+const InteractiveMap = dynamic(
+  () => import('./map-spoiler-interactive').then((m) => m.MapSpoilerInteractive),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[480px] w-full animate-pulse rounded-lg bg-[rgb(var(--bg-elevated))] sm:h-[560px]" />
+    ),
+  },
+)
 
 export function MapSpoiler() {
   return (
@@ -52,204 +68,47 @@ export function MapSpoiler() {
           </h2>
           <p className="mt-3 text-base text-[rgb(var(--text-muted))]">
             Setiap tokoh punya jejak lokasi — kelahiran, hijrah, dakwah, hingga
-            wafat. Di dalam aplikasi, peta ini bisa zoom hingga koordinat
-            individual + overlay rute hijrah dan medan perang.
+            wafat. Region historis seperti Hijaz, Syam, Iraq, dan Khurasan
+            terbentang di peta dunia modern; zoom out untuk membandingkan dengan
+            negara saat ini.
           </p>
         </div>
 
         <figure className="mt-10 overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 shadow-sm sm:p-6">
-          <svg
-            viewBox="0 0 800 480"
-            role="img"
-            aria-label="Contoh peta region Hijaz, Syam, Iraq, Khurasan, Misr, dan Andalusia dengan 15 lokasi penting sirah"
-            className="h-auto w-full"
-          >
-            <defs>
-              <linearGradient id="land-grad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgb(var(--bg-elevated))" />
-                <stop offset="100%" stopColor="rgb(var(--bg))" />
-              </linearGradient>
-              <radialGradient id="pin-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgb(var(--accent))" stopOpacity="0.6" />
-                <stop offset="100%" stopColor="rgb(var(--accent))" stopOpacity="0" />
-              </radialGradient>
-            </defs>
+          <InteractiveMap />
 
-            {/* Stylized region outline — abstract, NOT geographically accurate.
-                Represents Andalusia → Misr → Hijaz → Syam → Iraq → Khurasan.
-                Drawn as a soft horizontal landmass band. */}
-            <path
-              d="M 20 180
-                 Q 90 150 180 175
-                 L 240 220
-                 Q 310 195 380 215
-                 L 450 245
-                 Q 540 215 640 175
-                 Q 720 155 780 175
-                 L 780 360
-                 Q 700 400 600 380
-                 Q 500 360 420 380
-                 L 360 420
-                 Q 280 400 200 410
-                 Q 100 415 20 380 Z"
-              fill="url(#land-grad)"
-              stroke="rgb(var(--border))"
-              strokeWidth={1.5}
-            />
-
-            {/* Region labels — subtle */}
-            <text
-              x={70}
-              y={235}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              ANDALUSIA
-            </text>
-            <text
-              x={228}
-              y={328}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              MISR
-            </text>
-            <text
-              x={310}
-              y={356}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              HIJAZ
-            </text>
-            <text
-              x={315}
-              y={182}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              SYAM
-            </text>
-            <text
-              x={430}
-              y={196}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              IRAQ
-            </text>
-            <text
-              x={580}
-              y={142}
-              fontSize={11}
-              fontWeight={600}
-              fill="rgb(var(--text-muted))"
-              fontFamily="var(--font-body-latin)"
-              opacity={0.7}
-            >
-              KHURASAN
-            </text>
-
-            {/* Hijrah route — dashed line Mekkah → Madinah */}
-            <path
-              d="M 360 320 Q 358 300 372 282"
-              stroke="rgb(var(--accent))"
-              strokeWidth={1.5}
-              strokeDasharray="4 3"
-              fill="none"
-              opacity={0.7}
-            />
-
-            {/* Pins */}
-            {LOCATIONS.map((loc) => (
-              <g key={loc.id}>
-                {/* Glow */}
-                <circle cx={loc.cx} cy={loc.cy} r={14} fill="url(#pin-glow)" />
-                {/* Pin */}
-                <circle
-                  cx={loc.cx}
-                  cy={loc.cy}
-                  r={5}
-                  fill="rgb(var(--primary))"
-                  stroke="rgb(var(--surface))"
-                  strokeWidth={1.5}
+          {/* Legend — color-coded list of region swatches. Rendered server-side
+              so it is visible even before the map JS finishes loading. */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+            {LEGEND_REGIONS.map((r) => (
+              <span
+                key={r.label}
+                className="inline-flex items-center gap-1.5 text-xs text-[rgb(var(--text-muted))]"
+              >
+                <span
+                  aria-hidden
+                  className="inline-block h-3 w-3 rounded-sm border border-[rgb(var(--border))]"
+                  style={{ backgroundColor: r.color, opacity: 0.6 }}
                 />
-                {/* Label */}
-                <text
-                  x={loc.cx + 8}
-                  y={loc.cy - 6}
-                  fontSize={11}
-                  fontWeight={500}
-                  fill="rgb(var(--text))"
-                  fontFamily="var(--font-body-latin)"
-                >
-                  {loc.nameId}
-                </text>
-              </g>
+                {r.label}
+              </span>
             ))}
-
-            {/* Legend (bottom-right) */}
-            <g transform="translate(560, 420)">
-              <rect
-                x={0}
-                y={0}
-                width={210}
-                height={42}
-                rx={6}
-                fill="rgb(var(--surface))"
-                stroke="rgb(var(--border))"
-                strokeWidth={1}
+            <span className="inline-flex items-center gap-1.5 text-xs text-[rgb(var(--text-muted))]">
+              <span
+                aria-hidden
+                className="inline-block h-[2px] w-5"
+                style={{
+                  background:
+                    'repeating-linear-gradient(90deg, rgb(var(--accent)) 0 4px, transparent 4px 8px)',
+                }}
               />
-              <circle cx={14} cy={14} r={4} fill="rgb(var(--primary))" />
-              <text
-                x={26}
-                y={18}
-                fontSize={11}
-                fill="rgb(var(--text-muted))"
-                fontFamily="var(--font-body-latin)"
-              >
-                Lokasi penting
-              </text>
-              <line
-                x1={4}
-                y1={30}
-                x2={24}
-                y2={30}
-                stroke="rgb(var(--accent))"
-                strokeWidth={1.5}
-                strokeDasharray="4 3"
-              />
-              <text
-                x={28}
-                y={34}
-                fontSize={11}
-                fill="rgb(var(--text-muted))"
-                fontFamily="var(--font-body-latin)"
-              >
-                Rute Hijrah Nabi ﷺ
-              </text>
-            </g>
-          </svg>
+              Rute Hijrah Nabi ﷺ
+            </span>
+          </div>
 
-          <figcaption className="mt-4 text-xs text-[rgb(var(--text-muted))]">
-            Ilustrasi region — bukan proyeksi geografis akurat. Peta di dalam
-            aplikasi pakai tile OpenStreetMap dengan koordinat presisi tiap
-            lokasi.
+          <figcaption className="mt-3 text-xs text-[rgb(var(--text-muted))]">
+            Batas region adalah aproksimasi — bukan batas politik. Peta di dalam
+            aplikasi menampilkan koordinat presisi tiap tokoh.
           </figcaption>
         </figure>
       </div>

@@ -75,7 +75,12 @@ const MIN_YEAR = -60 // a bit before Nabi's birth
 const MAX_YEAR = 740 // a bit after Ibn Taimiyyah's death
 const RANGE = MAX_YEAR - MIN_YEAR
 const ROW_HEIGHT = 56
-const PADDING_X = 64
+// Asymmetric horizontal padding: a wide LABEL_GUTTER on the left reserves
+// space for the row labels (name + category/dates) so long names like
+// "Tabi'ut Tabi'in · 194 H – 256 H" don't get clipped, while the right
+// edge uses a slim PADDING_RIGHT.
+const LABEL_GUTTER = 240
+const PADDING_RIGHT = 32
 const PADDING_TOP = 56
 const PADDING_BOTTOM = 32
 const SVG_WIDTH = 880
@@ -83,8 +88,8 @@ const SVG_WIDTH = 880
 const SVG_HEIGHT = PADDING_TOP + SAMPLE.length * ROW_HEIGHT + PADDING_BOTTOM
 
 function yearToX(year: number, width: number): number {
-  const usable = width - PADDING_X * 2
-  return PADDING_X + ((year - MIN_YEAR) / RANGE) * usable
+  const usable = width - LABEL_GUTTER - PADDING_RIGHT
+  return LABEL_GUTTER + ((year - MIN_YEAR) / RANGE) * usable
 }
 
 // Axis ticks every 100 H plus the Hijrah baseline (year 0).
@@ -125,9 +130,9 @@ export function TimelineSpoiler() {
           >
             {/* Axis line */}
             <line
-              x1={PADDING_X}
+              x1={LABEL_GUTTER}
               y1={PADDING_TOP - 16}
-              x2={SVG_WIDTH - PADDING_X}
+              x2={SVG_WIDTH - PADDING_RIGHT}
               y2={PADDING_TOP - 16}
               stroke="rgb(var(--border))"
               strokeWidth={1}
@@ -182,9 +187,9 @@ export function TimelineSpoiler() {
                   {/* Row separator */}
                   {i > 0 && (
                     <line
-                      x1={PADDING_X}
+                      x1={LABEL_GUTTER}
                       y1={y}
-                      x2={SVG_WIDTH - PADDING_X}
+                      x2={SVG_WIDTH - PADDING_RIGHT}
                       y2={y}
                       stroke="rgb(var(--border))"
                       strokeOpacity={0.4}
@@ -193,7 +198,7 @@ export function TimelineSpoiler() {
                   )}
                   {/* Label (left) */}
                   <text
-                    x={PADDING_X - 12}
+                    x={LABEL_GUTTER - 16}
                     y={y + 20}
                     textAnchor="end"
                     fontSize={13}
@@ -204,10 +209,10 @@ export function TimelineSpoiler() {
                     {row.nameId}
                   </text>
                   <text
-                    x={PADDING_X - 12}
+                    x={LABEL_GUTTER - 16}
                     y={y + 34}
                     textAnchor="end"
-                    fontSize={11}
+                    fontSize={10}
                     fill="rgb(var(--text-muted))"
                     fontFamily="var(--font-body-latin)"
                   >

@@ -114,10 +114,13 @@ export async function seed028DevUsers() {
       continue
     }
 
-    // 2. Better-auth credential account
+    // 2. Better-auth credential account.
+    // NOTE: better-auth's credential provider stores `accountId = user.id`
+    // (the user's UUID), NOT the email. The email→user lookup happens via
+    // `users.email`; the account row is keyed by userId.
     await db.insert(accounts).values({
       userId: user.id,
-      accountId: seed.email,
+      accountId: user.id,
       providerId: 'credential',
       password: passwordHash,
     })
