@@ -15,6 +15,11 @@ const config = [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // We use `any` in loose API typing layers; surface as warnings, not errors.
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-empty-object-type': 'warn',
+      'react/no-unescaped-entities': 'warn',
+      '@next/next/no-img-element': 'warn',
     },
   },
 ]

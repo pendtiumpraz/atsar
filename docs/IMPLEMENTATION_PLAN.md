@@ -266,60 +266,60 @@
 **Tujuan**: shell aplikasi, auth UI, sidebar+navbar, theme, fonts.
 
 ### 4.1 Setup & Configuration
-- [ ] **4.1.1** Tailwind 4 + design tokens dari UI_UX.md
-- [ ] **4.1.2** shadcn/ui install component basic (Button, Input, Card, Dialog, Dropdown, Tabs, ...)
-- [ ] **4.1.3** Lucide icons setup
-- [ ] **4.1.4** Sonner toast setup di `app/layout.tsx`
-- [ ] **4.1.5** SweetAlert2 + wrapper custom (FRONTEND §6)
-- [ ] **4.1.6** Framer Motion + reduced-motion respect
-- [ ] **4.1.7** TanStack Query provider
-- [ ] **4.1.8** Zustand stores: theme, calendar, sidebar
-- [ ] **4.1.9** API client (`lib/api`) dengan fetch wrapper + auth header
+- [x] **4.1.1** Tailwind 4 + design tokens (Phase 0)
+- [x] **4.1.2** shadcn/ui 19 atoms (Button, Input, Card, Dialog, Dropdown, Tabs, Switch, Avatar, Badge, etc.) (F1)
+- [x] **4.1.3** Lucide icons setup
+- [x] **4.1.4** Sonner toast `app/layout.tsx`
+- [x] **4.1.5** SweetAlert2 wrapper at `lib/swal.ts` + `use-confirm` hook (F7)
+- [~] **4.1.6** Framer Motion installed; reduced-motion respect via `prefers-reduced-motion` CSS handled in globals.css
+- [x] **4.1.7** TanStack Query provider wired in root layout (F7 + merge)
+- [x] **4.1.8** Zustand stores: sidebar, calendar, ai-credit (F7)
+- [x] **4.1.9** API client `lib/api/client.ts` + `endpoints.ts` typed wrappers (F7)
 
 ### 4.2 Theme & Font System
-- [ ] **4.2.1** CSS variables light + dark mode (BRANDING §4, §4b)
-- [ ] **4.2.2** Anti-flash inline script di `<head>`
-- [ ] **4.2.3** Dynamic font CSS injection dari `/api/v1/public/theme/fonts`
-- [ ] **4.2.4** ThemeToggle component (3-state: Light/Dark/Auto)
-- [ ] **4.2.5** Sync preference ke DB on change
+- [x] **4.2.1** CSS variables light + dark mode (Phase 0 globals.css)
+- [x] **4.2.2** Anti-flash inline script component (F2) wired in layout
+- [x] **4.2.3** Dynamic font CSS injection via `<FontLoader />` server component (F3)
+- [x] **4.2.4** ThemeToggle 3-state (Light/Dark/Auto) with dropdown + segmented variants (F2)
+- [~] **4.2.5** Sync preference ke DB: client posts to `/api/v1/users/me/preferences` (endpoint TBD)
 
 ### 4.3 Atomic Components
-- [ ] **4.3.1** Atoms: Button, Input, Label, Badge, Avatar, Spinner, Skeleton, Switch, Checkbox, Radio
-- [ ] **4.3.2** Molecules: FormField, SearchBox, BackButton, Breadcrumb, EmptyState, Card, Pagination, DateRangePicker, CalendarModeToggle, LanguageSelector
-- [ ] **4.3.3** Organisms: Sidebar (collapsible, icon 1 warna), Navbar (AI credit chip, quota, theme, calendar, notification, user menu)
+- [x] **4.3.1** Atoms: 20 shadcn components (F1)
+- [~] **4.3.2** Molecules: BackButton (F10), FilterBar (F10) — others TBD per page
+- [x] **4.3.3** Organisms: Sidebar (icon 1 warna, collapsible), Navbar (AI credit, quota, theme, calendar, notification bell, user menu) (F5)
 
 ### 4.4 Layout Shells
-- [ ] **4.4.1** `(app)/layout.tsx` — sidebar + navbar + main
-- [ ] **4.4.2** `(admin)/layout.tsx`
-- [ ] **4.4.3** `(reviewer)/layout.tsx`
-- [ ] **4.4.4** `(marketing)/layout.tsx` (public)
-- [ ] **4.4.5** Mobile drawer pattern
+- [x] **4.4.1** `(app)/layout.tsx` — sidebar + navbar + main with auth + subscription guard (F4)
+- [x] **4.4.2** `(admin)/layout.tsx` — admin role check (F4)
+- [x] **4.4.3** `(reviewer)/layout.tsx` — reviewer/admin role check (F4)
+- [x] **4.4.4** `(marketing)/layout.tsx` — public landing/pricing (F4)
+- [x] **4.4.5** Mobile drawer pattern in Sidebar (F5)
 
 ### 4.5 Auth Pages
-- [ ] **4.5.1** Login, Register, Verify Email, Forgot Password
-- [ ] **4.5.2** Onboarding wizard (5 step)
-- [ ] **4.5.3** Subscription expired page
+- [x] **4.5.1** Login, Register, Verify Email, Forgot Password, Reset Password (F6)
+- [x] **4.5.2** Onboarding wizard 5-step (F6)
+- [x] **4.5.3** Subscription expired page (F6)
 
 ### 4.6 i18n & Calendar
-- [ ] **4.6.1** next-intl setup dengan ID + AR dictionaries
-- [ ] **4.6.2** Hijri converter integration (`packages/hijri`)
-- [ ] **4.6.3** `formatYear()`, `formatDate()` utilities
-- [ ] **4.6.4** CalendarModeToggle wired ke store
+- [x] **4.6.1** next-intl config + ID + AR dictionaries (F8)
+- [x] **4.6.2** Hijri converter via `@athar/hijri` (Phase 0)
+- [x] **4.6.3** `formatYear()`, `formatDate()` utilities (F8)
+- [x] **4.6.4** CalendarModeToggle wired to Zustand store (F5 + F7)
 
-**Exit criteria**: user bisa register → login → masuk dashboard → toggle theme/calendar/font.
+**Exit criteria**: user bisa register → login → masuk dashboard → toggle theme/calendar/font. ✅
 
 ---
 
 ## Phase 5 — Frontend Features (Konten User)
 
 ### 5.1 Dashboard Subscriber
-- [ ] **5.1.1** Dashboard widgets (quota cards, lanjut belajar, akses cepat)
-- [ ] **5.1.2** Recharts integration
+- [x] **5.1.1** Dashboard widgets (3 quota cards, lanjut belajar, akses cepat) (F9)
+- [ ] **5.1.2** Recharts integration — TBD (basic dashboard uses plain progress bars)
 
 ### 5.2 Figures (1-Page CRUD Pattern)
-- [ ] **5.2.1** `/figures` list dengan filter & search
-- [ ] **5.2.2** `/figures/[slug]` detail dengan tabs
-- [ ] **5.2.3** ListDetailShell template
+- [x] **5.2.1** `/figures` list dengan filter & search (F10)
+- [x] **5.2.2** `/figures/[slug]` detail dengan tabs (F10 — Biografi/Timeline/Peta/Hubungan/Hadits/Sumber)
+- [x] **5.2.3** ListDetailShell template (F10)
 - [ ] **5.2.4** Back navigation pattern
 - [ ] **5.2.5** Modal pattern (`?modal=create|edit`)
 - [ ] **5.2.6** Citation popover (hover/click)

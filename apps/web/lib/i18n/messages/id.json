@@ -1,0 +1,47 @@
+{
+  "common": {
+    "save": "Simpan",
+    "cancel": "Batal",
+    "delete": "Hapus",
+    "edit": "Edit",
+    "back": "Kembali",
+    "loading": "Memuat...",
+    "search": "Cari",
+    "filter": "Filter",
+    "yes": "Ya",
+    "no": "Tidak"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "figures": "Tokoh",
+    "timeline": "Timeline",
+    "map": "Peta",
+    "battles": "Sirah Perang",
+    "quiz": "Quiz",
+    "chat": "AI Chat",
+    "pdf": "PDF Builder",
+    "settings": "Pengaturan",
+    "billing": "Tagihan"
+  },
+  "auth": {
+    "login": "Masuk",
+    "logout": "Keluar",
+    "register": "Daftar",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Lupa password?",
+    "rememberMe": "Ingat saya"
+  },
+  "calendar": {
+    "hijri": "Hijriyah",
+    "masehi": "Masehi",
+    "both": "Keduanya"
+  },
+  "tier": {
+    "free": "Free",
+    "sampler": "Sampler",
+    "basic": "Basic",
+    "pro": "Pro",
+    "premium": "Premium"
+  }
+}
