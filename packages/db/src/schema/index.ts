@@ -1,14 +1,18 @@
-// Drizzle schema entry. Full table definitions land in Phase 1.1 (DATABASE.md §1–§13).
-// Placeholder so package compiles & migrations machinery exists.
+// Schema barrel — re-export all tables.
+// Drizzle Kit reads from here.
 
-import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
+export * from './enums.js'
+export * from './_common.js'
 
-/**
- * Bootstrap table used to verify connectivity & migration system.
- * Will be replaced with full schema in Phase 1.1.3+.
- */
-export const _bootstrap = pgTable('_athar_bootstrap', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  note: text('note').notNull().default('Athar bootstrap row'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export * from './auth.js'
+export * from './billing.js'
+export * from './locations.js'
+export * from './figures.js'
+export * from './battles.js'
+export * from './citations.js'
+export * from './ai.js'
+export * from './fonts.js'
+export * from './pdf.js'
+export * from './quiz.js'
+export * from './notifications.js'
+export * from './audit.js'
