@@ -18,6 +18,11 @@ import type { ReactNode } from 'react'
 import { Navbar } from '@/components/organisms/navbar'
 import { Sidebar } from '@/components/organisms/sidebar'
 import { auth, getActiveSubscription } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
+
+// Staff roles bypass the subscription gate — admins manage the platform
+// and reviewers (ustadz) approve content; neither needs a paid plan.
+const STAFF_ROLES = new Set(['admin', 'reviewer'])
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   // 1. Auth gate — `headers()` returns a Promise in Next 15.
@@ -29,10 +34,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     redirect('/login')
   }
 
-  // 2. Subscription gate — null means no usable plan (missing/expired/cancelled).
-  const active = await getActiveSubscription(userId)
-  if (!active) {
-    redirect('/subscription-expired')
+  // 2. Subscription gate — staff roles bypass; everyone else needs a
+  // non-expired plan to enter the app shell.
+  const roles = await getUserRoleSlugs(userId)
+  const isStaff = [...roles].some((slug) => STAFF_ROLES.has(slug))
+  if (!isStaff) {
+    const active = await getActiveSubscription(userId)
+    if (!active) {
+      redirect('/subscription-expired')
+    }
   }
 
   // 3. Render shell. Sidebar collapses on narrow viewports — F5 handles that.

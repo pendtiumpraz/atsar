@@ -66,3 +66,18 @@ export async function hasPermission(userId: string, slug: string): Promise<boole
   const perms = await getEffectivePermissions(userId)
   return perms.has(slug)
 }
+
+/**
+ * Return the set of role slugs assigned to `userId` (e.g. `admin`,
+ * `reviewer`, `subscriber`). Used by the app shell to short-circuit the
+ * subscription gate for staff accounts — admins/reviewers do not need a
+ * paid plan to access the app.
+ */
+export async function getUserRoleSlugs(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ slug: roles.slug })
+    .from(userRoles)
+    .innerJoin(roles, and(eq(roles.id, userRoles.roleId), isNull(roles.deletedAt)))
+    .where(eq(userRoles.userId, userId))
+  return new Set(rows.map((r) => r.slug))
+}
