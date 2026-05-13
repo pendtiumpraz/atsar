@@ -5,12 +5,14 @@
 // ISR-friendly with `revalidate` so future content changes (e.g. tier
 // rename) propagate without a full deploy.
 //
-// Sections, top to bottom (per WIREFRAMES §1):
+// Sections, top to bottom:
 //   1. Hero
 //   2. Feature grid (4 cards)
-//   3. Cakupan tokoh (coverage list)
-//   4. Pricing preview (5 cards)
-//   5. Final CTA with admin contact + T&C link
+//   3. Timeline spoiler (preview)
+//   4. Map spoiler (preview)
+//   5. Cakupan tokoh (coverage list)
+//   6. Pricing preview (5 cards)
+//   7. Final CTA with admin contact + T&C link
 //
 // The marketing shell (header + footer) is owned by
 // `(marketing)/layout.tsx` and we do not duplicate it here.
@@ -19,7 +21,9 @@ import Link from 'next/link'
 
 import { FeatureGrid } from '@/components/marketing/feature-grid'
 import { MarketingHero } from '@/components/marketing/hero'
+import { MapSpoiler } from '@/components/marketing/map-spoiler'
 import { PricingCards } from '@/components/marketing/pricing-cards'
+import { TimelineSpoiler } from '@/components/marketing/timeline-spoiler'
 import { Button } from '@/components/ui/button'
 
 // Re-validate at most every hour — landing copy is essentially static but
@@ -39,6 +43,8 @@ export default function LandingPage() {
     <>
       <MarketingHero />
       <FeatureGrid />
+      <TimelineSpoiler />
+      <MapSpoiler />
       <CoverageSection />
       <PricingPreviewSection />
       <FinalCtaSection />

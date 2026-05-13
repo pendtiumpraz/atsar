@@ -24,10 +24,13 @@
   "dependencies": {
     "@athar/shared": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
+    "bcryptjs": "^3.0.3",
+    "date-fns": "^4.1.0",
     "dotenv": "^16.4.7",
     "postgres": "^3.4.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.10.0",
     "@upstash/qstash": "^2.10.1",
     "@upstash/redis": "^1.38.0",

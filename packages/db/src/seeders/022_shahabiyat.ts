@@ -1,0 +1,427 @@
+// Phase 7 content seed: Shahabiyat (sahabat perempuan).
+// Pattern mirrors 017_demo_figures.ts.
+// Excludes Khadijah binti Khuwailid & Aisyah binti Abu Bakr (seeded by 017).
+// Idempotent via onConflictDoNothing on figures.slug.
+
+import { getSeedDb, logSeed } from './_helpers.js'
+import { figures, figureCategories, locations } from '../schema/index.js'
+
+type DatePrecision = 'year' | 'month' | 'day' | 'approximate' | 'range'
+
+type FigureSeed = {
+  slug: string
+  categorySlug: string
+  gender: 'male' | 'female'
+  nameFullAr: string
+  nameFullId: string
+  kunyahAr?: string
+  laqabId?: string
+  birthAh?: number
+  birthCe?: number
+  birthPrecision?: DatePrecision
+  deathAh?: number
+  deathCe?: number
+  deathPrecision?: DatePrecision
+  socialCategory?: ('anshar' | 'muhajirin' | 'qurasy' | 'arab_non_qurasy' | 'mawla' | 'non_arab' | 'other')[]
+  specialty?: string[]
+  rijalGrade?: 'sahabi_udul' | 'thiqah' | 'not_narrator'
+  hadithMin?: number
+  hadithMax?: number
+  primaryLocSlug?: string
+  summaryId?: string
+}
+
+const FIGURES: FigureSeed[] = [
+  // ─── Ummahatul Mukminin (selain Khadijah & Aisyah) ─────────
+  {
+    slug: 'saudah-binti-zamah',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'سودة بنت زمعة رضي الله عنها',
+    nameFullId: "Saudah binti Zam'ah RA",
+    kunyahAr: 'أم الأسود',
+    laqabId: 'Ummul Mukminin',
+    deathAh: 54,
+    deathCe: 674,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 5,
+    hadithMax: 5,
+    primaryLocSlug: 'madinah',
+    summaryId: "Istri Nabi ﷺ kedua setelah Khadijah RA. Hijrah ke Habasyah bersama suami pertamanya, Sakran bin 'Amr.",
+  },
+  {
+    slug: 'hafshah-binti-umar',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'حفصة بنت عمر رضي الله عنها',
+    nameFullId: 'Hafshah binti Umar RA',
+    laqabId: 'Ummul Mukminin',
+    birthAh: -18,
+    birthCe: 605,
+    birthPrecision: 'approximate',
+    deathAh: 45,
+    deathCe: 665,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 60,
+    hadithMax: 60,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Putri Umar bin Khattab RA, istri Nabi ﷺ. Penjaga mushaf Al-Quran pertama di masa Abu Bakr & Utsman.',
+  },
+  {
+    slug: 'zaynab-binti-khuzaymah',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'زينب بنت خزيمة رضي الله عنها',
+    nameFullId: 'Zaynab binti Khuzaymah RA',
+    laqabId: 'Ummul Masakin',
+    deathAh: 4,
+    deathCe: 625,
+    deathPrecision: 'year',
+    socialCategory: ['arab_non_qurasy'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: 'Istri Nabi ﷺ yang digelari "Ummul Masakin" karena kedermawanannya. Wafat di Madinah dalam usia muda.',
+  },
+  {
+    slug: 'ummu-salamah',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'أم سلمة هند بنت أبي أمية رضي الله عنها',
+    nameFullId: 'Ummu Salamah Hindun binti Abi Umayyah RA',
+    kunyahAr: 'أم سلمة',
+    laqabId: 'Ummul Mukminin',
+    deathAh: 62,
+    deathCe: 681,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 378,
+    hadithMax: 378,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Istri Nabi ﷺ, faqihah ahli hadits. Hijrah dua kali (Habasyah & Madinah). Perawi hadits terbanyak ketiga di antara ummahat.',
+  },
+  {
+    slug: 'zaynab-binti-jahsy',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'زينب بنت جحش رضي الله عنها',
+    nameFullId: 'Zaynab binti Jahsy RA',
+    laqabId: 'Ummul Mukminin',
+    birthAh: -25,
+    birthCe: 598,
+    birthPrecision: 'approximate',
+    deathAh: 20,
+    deathCe: 641,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 11,
+    hadithMax: 11,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Istri Nabi ﷺ, sepupu beliau. Pernikahannya turun langsung dengan wahyu (QS Al-Ahzab: 37). Ahli ibadah & sedekah.',
+  },
+  {
+    slug: 'juwairiyah-binti-harits',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'جويرية بنت الحارث رضي الله عنها',
+    nameFullId: 'Juwairiyah binti Harits RA',
+    laqabId: 'Ummul Mukminin',
+    deathAh: 56,
+    deathCe: 676,
+    deathPrecision: 'year',
+    socialCategory: ['arab_non_qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 7,
+    hadithMax: 7,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Putri pemimpin Bani Mushtaliq. Pernikahannya dengan Nabi ﷺ menyebabkan pembebasan 100 tawanan Bani Mushtaliq.',
+  },
+  {
+    slug: 'ummu-habibah',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'أم حبيبة رملة بنت أبي سفيان رضي الله عنها',
+    nameFullId: 'Ummu Habibah Ramlah binti Abu Sufyan RA',
+    kunyahAr: 'أم حبيبة',
+    laqabId: 'Ummul Mukminin',
+    deathAh: 44,
+    deathCe: 664,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 65,
+    hadithMax: 65,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Putri Abu Sufyan, istri Nabi ﷺ. Hijrah ke Habasyah; akadnya dinikahkan oleh Najasyi & maharnya dari Najasyi sendiri.',
+  },
+  {
+    slug: 'shafiyyah-binti-huyay',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'صفية بنت حيي رضي الله عنها',
+    nameFullId: "Shafiyyah binti Huyay RA",
+    laqabId: 'Ummul Mukminin',
+    deathAh: 50,
+    deathCe: 670,
+    deathPrecision: 'year',
+    socialCategory: ['other'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 10,
+    hadithMax: 10,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Istri Nabi ﷺ dari kalangan Bani Nadhir (keturunan Nabi Harun AS). Dinikahi setelah pembebasan Khaibar.',
+  },
+  {
+    slug: 'maimunah-binti-harits',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'ميمونة بنت الحارث رضي الله عنها',
+    nameFullId: 'Maimunah binti Harits RA',
+    laqabId: 'Ummul Mukminin',
+    deathAh: 51,
+    deathCe: 671,
+    deathPrecision: 'year',
+    socialCategory: ['arab_non_qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 76,
+    hadithMax: 76,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Istri terakhir Nabi ﷺ. Wafat paling akhir di antara ummahatul mukminin, di Saraf dekat Mekkah.',
+  },
+
+  // ─── Putri Nabi ﷺ ───────────────────────────────────────────
+  {
+    slug: 'fathimah-az-zahra',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'فاطمة الزهراء بنت محمد رضي الله عنها',
+    nameFullId: 'Fathimah az-Zahra binti Muhammad RA',
+    kunyahAr: 'أم أبيها',
+    laqabId: 'Az-Zahra, Sayyidah Nisa Ahlil Jannah',
+    birthAh: -13,
+    birthCe: 609,
+    birthPrecision: 'approximate',
+    deathAh: 11,
+    deathCe: 632,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 18,
+    hadithMax: 18,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Putri bungsu Nabi ﷺ, istri Ali bin Abi Thalib RA, ibu Hasan & Husain. Wafat 6 bulan setelah Nabi ﷺ.',
+  },
+  {
+    slug: 'zaynab-binti-muhammad',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'زينب بنت محمد رضي الله عنها',
+    nameFullId: 'Zaynab binti Muhammad RA',
+    deathAh: 8,
+    deathCe: 629,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: "Putri sulung Nabi ﷺ. Istri Abu al-'Ash bin Rabi'. Hijrah ke Madinah setelah suaminya masuk Islam.",
+  },
+  {
+    slug: 'ruqayyah-binti-muhammad',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'رقية بنت محمد رضي الله عنها',
+    nameFullId: 'Ruqayyah binti Muhammad RA',
+    deathAh: 2,
+    deathCe: 624,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: 'Putri Nabi ﷺ, istri Utsman bin Affan RA. Hijrah ke Habasyah lalu Madinah. Wafat saat Perang Badar.',
+  },
+  {
+    slug: 'ummu-kultsum-binti-muhammad',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'أم كلثوم بنت محمد رضي الله عنها',
+    nameFullId: 'Ummu Kultsum binti Muhammad RA',
+    kunyahAr: 'أم كلثوم',
+    deathAh: 9,
+    deathCe: 630,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: "Putri Nabi ﷺ, dinikahi Utsman bin Affan RA setelah wafatnya Ruqayyah — karenanya Utsman digelari Dzun Nurain.",
+  },
+
+  // ─── Shahabiyat penting lain ───────────────────────────────
+  {
+    slug: 'asma-binti-abu-bakr',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'أسماء بنت أبي بكر رضي الله عنها',
+    nameFullId: 'Asma binti Abu Bakr RA',
+    laqabId: 'Dzatun Nithaqayn',
+    birthAh: -27,
+    birthCe: 595,
+    birthPrecision: 'approximate',
+    deathAh: 73,
+    deathCe: 692,
+    deathPrecision: 'year',
+    socialCategory: ['muhajirin', 'qurasy'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 58,
+    hadithMax: 58,
+    primaryLocSlug: 'makkah',
+    summaryId: 'Putri Abu Bakr RA, saudari Aisyah, istri Zubair bin Awwam, ibu Abdullah bin Zubair. Mengantarkan bekal di Gua Tsur saat hijrah.',
+  },
+  {
+    slug: 'ummu-aiman',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: "أم أيمن بركة بنت ثعلبة رضي الله عنها",
+    nameFullId: "Ummu Aiman Barakah binti Tsa'labah RA",
+    kunyahAr: 'أم أيمن',
+    deathAh: 23,
+    deathCe: 644,
+    deathPrecision: 'year',
+    socialCategory: ['mawla'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 5,
+    hadithMax: 5,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Pengasuh Nabi ﷺ sejak kecil, dibebaskan beliau. Ibu Usamah bin Zaid. Disebut Nabi ﷺ sebagai "ibuku setelah ibuku".',
+  },
+  {
+    slug: 'sumayyah-binti-khayyat',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'سمية بنت خياط رضي الله عنها',
+    nameFullId: 'Sumayyah binti Khayyat RA',
+    laqabId: 'Syahidah Pertama Islam',
+    deathAh: -7,
+    deathCe: 615,
+    deathPrecision: 'approximate',
+    socialCategory: ['mawla'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'makkah',
+    summaryId: 'Ibu Ammar bin Yasir RA. Syahidah pertama dalam Islam, dibunuh Abu Jahl karena teguh memegang iman.',
+  },
+  {
+    slug: 'khansa-binti-amr',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: "الخنساء بنت عمرو رضي الله عنها",
+    nameFullId: "Khansa binti 'Amr RA",
+    kunyahAr: 'أم عمرو',
+    deathAh: 24,
+    deathCe: 645,
+    deathPrecision: 'approximate',
+    socialCategory: ['arab_non_qurasy'],
+    specialty: ['poetry'],
+    rijalGrade: 'sahabi_udul',
+    summaryId: "Penyair Arab tersohor. Masuk Islam bersama kaumnya Bani Sulaim. Empat putranya gugur syahid di Perang Qadisiyyah.",
+  },
+  {
+    slug: 'nusaybah-binti-kaab',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'نسيبة بنت كعب رضي الله عنها',
+    nameFullId: "Nusaybah binti Ka'b RA",
+    kunyahAr: 'أم عمارة',
+    laqabId: 'Ummu Imarah',
+    socialCategory: ['anshar'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: 'Shahabiyah anshariyah dari Bani Najjar. Ikut Baiat Aqabah Kedua. Berperang di Uhud melindungi Nabi ﷺ secara langsung.',
+  },
+  {
+    slug: 'ummu-sulaym',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: 'أم سليم بنت ملحان رضي الله عنها',
+    nameFullId: 'Ummu Sulaym binti Milhan RA',
+    kunyahAr: 'أم سليم',
+    socialCategory: ['anshar'],
+    rijalGrade: 'sahabi_udul',
+    hadithMin: 14,
+    hadithMax: 14,
+    primaryLocSlug: 'madinah',
+    summaryId: 'Ibu Anas bin Malik RA, istri Abu Thalhah RA. Anshariyah pemberani; menjadikan keislaman Abu Thalhah sebagai maharnya.',
+  },
+  {
+    slug: 'rufaidah-binti-saad',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: "رفيدة بنت سعد الأسلمية رضي الله عنها",
+    nameFullId: "Rufaidah binti Sa'd al-Aslamiyyah RA",
+    laqabId: 'Perawat Pertama Islam',
+    socialCategory: ['anshar'],
+    specialty: ['medicine'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: 'Perawat (tabibah) pertama dalam Islam. Mendirikan tenda medis di sisi Masjid Nabawi untuk merawat korban perang.',
+  },
+  {
+    slug: 'khaulah-binti-tsalabah',
+    categorySlug: 'sahabat',
+    gender: 'female',
+    nameFullAr: "خولة بنت ثعلبة رضي الله عنها",
+    nameFullId: "Khaulah binti Tsa'labah RA",
+    socialCategory: ['anshar'],
+    rijalGrade: 'sahabi_udul',
+    primaryLocSlug: 'madinah',
+    summaryId: "Shahabiyah anshariyah yang mengadu kepada Nabi ﷺ tentang suaminya — turunlah awal Surat Al-Mujadilah karenanya.",
+  },
+]
+
+export async function seed022Shahabiyat() {
+  const db = getSeedDb()
+  const cats = await db.select().from(figureCategories)
+  const catBySlug = new Map(cats.map((c) => [c.slug, c.id]))
+  const locs = await db.select().from(locations)
+  const locBySlug = new Map(locs.map((l) => [l.slug, l.id]))
+
+  let total = 0
+  for (const f of FIGURES) {
+    const categoryId = catBySlug.get(f.categorySlug)
+    if (!categoryId) continue
+    const primaryLocationId = f.primaryLocSlug ? locBySlug.get(f.primaryLocSlug) : undefined
+    const result = await db
+      .insert(figures)
+      .values({
+        slug: f.slug,
+        categoryId,
+        gender: f.gender,
+        nameFullAr: f.nameFullAr,
+        nameFullId: f.nameFullId,
+        kunyahAr: f.kunyahAr,
+        laqabId: f.laqabId,
+        birthDateAh: f.birthAh,
+        birthDateCe: f.birthCe,
+        birthDatePrecision: f.birthPrecision,
+        deathDateAh: f.deathAh,
+        deathDateCe: f.deathCe,
+        deathDatePrecision: f.deathPrecision,
+        socialCategory: f.socialCategory,
+        specialty: f.specialty,
+        rijalGrade: f.rijalGrade ?? 'unverified',
+        hadithCountMin: f.hadithMin,
+        hadithCountMax: f.hadithMax,
+        primaryLocationId,
+        summaryId: f.summaryId,
+        status: 'published',
+        publishedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning()
+    if (result.length > 0) total++
+  }
+  logSeed('shahabiyat', total)
+}

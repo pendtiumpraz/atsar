@@ -1,11 +1,12 @@
-// Seed runner. Runs production seeders 001–016 by default.
-// With --dev flag also runs 017_demo_figures.
+// Seed runner. Runs production seeders 001–016 + 018–027 (content) by default.
+// With --dev flag also runs 017_demo_figures (small dev sample).
 // Usage: pnpm db:seed [--dev]
 
 import { loadEnvFromMonorepoRoot } from '@athar/shared/env'
 loadEnvFromMonorepoRoot()
 
 import { closeSeedDb } from './seeders/_helpers.js'
+// ─── Bootstrap (system data) ─────────────────────────────────────
 import { seed001Roles } from './seeders/001_roles.js'
 import { seed002Permissions } from './seeders/002_permissions.js'
 import { seed003RolePermissions } from './seeders/003_role_permissions.js'
@@ -24,11 +25,25 @@ import { seed015LocationsCore } from './seeders/015_locations_core.js'
 import { seed016AdminUser } from './seeders/016_admin_user.js'
 import { seed017DemoFigures } from './seeders/017_demo_figures.js'
 
+// ─── Phase 7 content (real historical data) ──────────────────────
+import { seed018LocationsExtra } from './seeders/018_locations_extra.js'
+import { seed019NabiRasul } from './seeders/019_nabi_rasul.js'
+import { seed020ShalihPreRasul } from './seeders/020_shalih_pre_rasul.js'
+import { seed021SahabatMale } from './seeders/021_sahabat_male.js'
+import { seed022Shahabiyat } from './seeders/022_shahabiyat.js'
+import { seed023Tabiin } from './seeders/023_tabiin.js'
+import { seed024TabiutTabiin } from './seeders/024_tabiut_tabiin.js'
+import { seed025UlamaPascaSalaf } from './seeders/025_ulama_pasca_salaf.js'
+import { seed026Ghazwah } from './seeders/026_ghazwah.js'
+import { seed027Relations } from './seeders/027_relations.js'
+import { seed028DevUsers } from './seeders/028_dev_users.js'
+
 async function main() {
   const isDev = process.argv.includes('--dev')
   console.log(`\nSeeding (mode: ${isDev ? 'dev' : 'production'})\n`)
 
   try {
+    // ── 1. System bootstrap (roles, perms, menus, tiers, etc.) ──
     await seed001Roles()
     await seed002Permissions()
     await seed003RolePermissions()
@@ -48,6 +63,30 @@ async function main() {
 
     if (isDev) {
       await seed017DemoFigures()
+    }
+
+    // ── 2. Phase 7 content ──────────────────────────────────────
+    // Locations FIRST so figures + battles can reference them.
+    await seed018LocationsExtra()
+
+    // Then figures by generation (categories must exist from 007).
+    await seed019NabiRasul()
+    await seed020ShalihPreRasul()
+    await seed021SahabatMale()
+    await seed022Shahabiyat()
+    await seed023Tabiin()
+    await seed024TabiutTabiin()
+    await seed025UlamaPascaSalaf()
+
+    // Battles depend on locations + (optionally) figure commanders.
+    await seed026Ghazwah()
+
+    // Relations last — references figures, locations, and battles.
+    await seed027Relations()
+
+    // Dev-only sample users (admin / reviewer / subscriber).
+    if (isDev) {
+      await seed028DevUsers()
     }
 
     console.log('\n✓ Seed complete.')

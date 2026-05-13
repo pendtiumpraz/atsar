@@ -412,22 +412,37 @@
 
 ## Phase 7 — Crawling & Konten Awal
 
-### 7.1 Awal Crawl
-- [ ] **7.1.1** Admin curate list 30 sahabat untuk Free tier (priority high)
-- [ ] **7.1.2** Crawl 25 Nabi & Rasul
-- [ ] **7.1.3** Crawl Shalih Pre-Rasul (10–15 tokoh)
-- [ ] **7.1.4** Crawl 60 sahabat utama (untuk tier Sampler & Basic)
-- [ ] **7.1.5** Review oleh ustadz (mungkin perlu hire min 2 ustadz)
-- [ ] **7.1.6** Publish setelah approve
+> **Status: SEEDED via deterministic seeders (bukan AI crawl).** Konten awal di-seed dari sumber salaf (Sirah Ibn Hisham, Al-Bidayah wan-Nihayah, Siyar A'lam an-Nubala', Kutub Sittah) untuk bootstrap database sebelum reviewer publish. AI crawler tetap akan dipakai untuk expansion masa depan via Phase 6 workflow.
+
+### 7.1 Awal Crawl → Seed
+- [x] **7.1.1** Curate list awal sahabat untuk Free/Sampler tier (30 sahabat utama + 21 shahabiyat seeded)
+- [x] **7.1.2** Seed 24 Nabi & Rasul → `seeders/019_nabi_rasul.ts`
+- [x] **7.1.3** Seed Shalih Pre-Rasul (12 tokoh: Khidir, Luqman, Maryam, Ashabul Kahfi, dll) → `seeders/020_shalih_pre_rasul.ts`
+- [x] **7.1.4** Seed 30 sahabat utama + 21 shahabiyat → `seeders/021_sahabat_male.ts`, `seeders/022_shahabiyat.ts`
+- [ ] **7.1.5** Review oleh ustadz — pending (dev reviewer account ready: `reviewer@atsar.local`)
+- [ ] **7.1.6** Publish setelah approve — pending review workflow
 
 ### 7.2 Expansion
-- [ ] **7.2.1** Crawl ~100 tabi'in utama
-- [ ] **7.2.2** Crawl tabi'ut tabi'in (Bukhari, Muslim, Ahmad, dll)
-- [ ] **7.2.3** Crawl ulama pasca-tabi'ut hingga modern wafat
-- [ ] **7.2.4** Crawl sirah perang (Ghazwah utama + sariyyah penting)
-- [ ] **7.2.5** Mapping locations + koordinat akurat
+- [x] **7.2.1** Seed 29 tabi'in utama (7 Fuqaha Madinah, Hasan al-Bashri, Ibn Sirin, dll) → `seeders/023_tabiin.ts`
+- [x] **7.2.2** Seed 29 tabi'ut tabi'in (4 Imam Mazhab + Kutub Sittah authors + Ahmad bin Hanbal) → `seeders/024_tabiut_tabiin.ts`
+- [x] **7.2.3** Seed 32 ulama pasca-salaf (Nawawi, Ibn Taimiyyah, Ibn Qayyim, Bin Baz, Albani, Utsaimin, dll s/d 2026) → `seeders/025_ulama_pasca_salaf.ts`
+- [x] **7.2.4** Seed 15 ghazwah + sariyyah utama (Badar, Uhud, Khandaq, Khaibar, Hunain, Tabuk, dll) → `seeders/026_ghazwah.ts`
+- [x] **7.2.5** Seed 54 locations historis dengan koordinat (Mekkah, Madinah, Andalusia, Khurasan, dll) → `seeders/018_locations_extra.ts`
+- [x] **7.2.6** Seed relasi: 109 figure_locations + 54 battle_participants + 78 figure_relations (guru-murid) → `seeders/027_relations.ts`
 
-**Exit criteria**: minimal 100 tokoh published dengan review ustadz lengkap.
+### 7.3 Dev Bootstrap & Demo
+- [x] **7.3.1** Seed 3 dev users (admin/reviewer/subscriber) + reviewerProfile + premium trial → `seeders/028_dev_users.ts`
+- [x] **7.3.2** Landing page spoiler — timeline komparatif (SVG, 6 tokoh) → `components/marketing/timeline-spoiler.tsx`
+- [x] **7.3.3** Landing page spoiler — peta historis (SVG, 15 locations + Hijrah route) → `components/marketing/map-spoiler.tsx`
+
+**Seed totals (per dry-run di Neon)**:
+- 54 locations + 84 total (termasuk seed awal) = **84 locations**
+- 24 nabi + 12 shalih + 30 sahabat + 21 shahabiyat + 29 tabi'in + 29 tabi'ut + 32 pasca = **172 figures**
+- 15 ghazwah
+- 109 figure_locations + 54 battle_participants + 78 figure_relations = **241 edges**
+- 3 dev users
+
+**Exit criteria**: ~~minimal 100 tokoh published dengan review ustadz lengkap~~ → **172 tokoh seeded (status: draft), siap review ustadz.** Phase 7.1.5 & 7.1.6 berpindah ke Phase 8 (review workflow live).
 
 ---
 
