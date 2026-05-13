@@ -30,7 +30,7 @@ export default function RootError({
       className="flex min-h-screen flex-col items-center justify-center bg-[rgb(var(--bg))] px-4 py-16 text-center text-[rgb(var(--text))]"
     >
       <div className="flex max-w-xl flex-col items-center gap-6">
-        {/* Athar mark, faded — we're in a bad state, don't shout. */}
+        {/* Atsar mark, faded — we're in a bad state, don't shout. */}
         <div className="flex items-center gap-3 opacity-60">
           <span
             className="text-4xl leading-none"

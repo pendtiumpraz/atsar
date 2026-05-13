@@ -25,7 +25,7 @@ function MarketingHeader() {
         <Link
           href="/"
           className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))] rounded-md"
-          aria-label="Athar — beranda"
+          aria-label="Atsar — beranda"
         >
           <span
             className="text-2xl font-bold leading-none"
@@ -40,7 +40,7 @@ function MarketingHeader() {
             className="text-lg font-semibold tracking-wide"
             style={{ fontFamily: 'var(--font-display-latin)' }}
           >
-            Athar
+            Atsar
           </span>
         </Link>
 
@@ -103,7 +103,7 @@ function MarketingFooter() {
               className="text-base font-semibold"
               style={{ fontFamily: 'var(--font-display-latin)' }}
             >
-              Athar
+              Atsar
             </span>
           </div>
           <p className="mt-2 max-w-xs text-sm text-[rgb(var(--text-muted))]">
@@ -154,7 +154,7 @@ function MarketingFooter() {
       </div>
       <div className="border-t border-[rgb(var(--border))]">
         <p className="mx-auto w-full max-w-6xl px-4 py-4 text-center text-xs text-[rgb(var(--text-faint))] sm:px-6">
-          © {new Date().getFullYear()} Athar. Seluruh konten bersumber dari salaf — semoga
+          © {new Date().getFullYear()} Atsar. Seluruh konten bersumber dari salaf — semoga
           bermanfaat.
         </p>
       </div>

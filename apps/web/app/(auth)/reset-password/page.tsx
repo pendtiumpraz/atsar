@@ -12,7 +12,7 @@ import { ResetPasswordForm } from '@/components/auth/reset-password-form'
 
 export const metadata: Metadata = {
   title: 'Reset password',
-  description: 'Atur password baru untuk akun Athar Anda.',
+  description: 'Atur password baru untuk akun Atsar Anda.',
 }
 
 export default function ResetPasswordPage() {

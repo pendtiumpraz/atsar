@@ -58,7 +58,7 @@ function Breadcrumb({ pathname }: { pathname: string }) {
         href="/dashboard"
         className="text-sm font-medium text-[rgb(var(--text-muted))] hover:text-[rgb(var(--text))]"
       >
-        Athar
+        Atsar
       </Link>
       {crumbs.map((c, i) => (
         <React.Fragment key={c.href}>

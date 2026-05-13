@@ -1,4 +1,4 @@
-# Athar (أثر)
+# Atsar (أثر)
 
 > Jejak generasi terbaik, dalam genggamanmu.
 
@@ -92,4 +92,4 @@ Admin: **Galih** • WA **0813-1950-4441**
 
 ## Lisensi
 
-Proprietary — © 2026 Athar. Hak cipta dilindungi.
+Proprietary — © 2026 Atsar. Hak cipta dilindungi.

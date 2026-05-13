@@ -1,4 +1,4 @@
-# Athar — Backend Architecture & Conventions
+# Atsar — Backend Architecture & Conventions
 
 > Backend = Next.js API routes + Server Actions + Worker service. TypeScript strict.
 > Lihat `ARCHITECTURE.md` untuk overview, `DATABASE.md` untuk schema.
@@ -670,7 +670,7 @@ MAIL_FROM=noreply@athar.id
 
 # App
 NEXT_PUBLIC_APP_URL=https://athar.id
-NEXT_PUBLIC_BRAND_NAME=Athar
+NEXT_PUBLIC_BRAND_NAME=Atsar
 NODE_ENV=production
 LOG_LEVEL=info
 

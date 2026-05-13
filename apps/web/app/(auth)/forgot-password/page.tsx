@@ -11,7 +11,7 @@ import { ForgotPasswordForm } from '@/components/auth/forgot-password-form'
 
 export const metadata: Metadata = {
   title: 'Lupa password',
-  description: 'Atur ulang password akun Athar Anda.',
+  description: 'Atur ulang password akun Atsar Anda.',
 }
 
 export default function ForgotPasswordPage() {

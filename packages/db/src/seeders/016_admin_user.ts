@@ -18,7 +18,7 @@ export async function seed016AdminUser() {
   const db = getSeedDb()
   const email = process.env['SEED_ADMIN_EMAIL']
   const password = process.env['SEED_ADMIN_PASSWORD']
-  const fullName = process.env['SEED_ADMIN_NAME'] ?? 'Athar Admin'
+  const fullName = process.env['SEED_ADMIN_NAME'] ?? 'Atsar Admin'
 
   if (!email || !password) {
     console.warn('  ⚠ SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not set — skipping admin seed')

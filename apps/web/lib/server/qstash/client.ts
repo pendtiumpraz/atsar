@@ -1,7 +1,7 @@
 // QStash client + publishing helpers.
 // See docs/ARCHITECTURE.md §4 — Worker Strategy (QStash, not BullMQ).
 //
-// All async work in Athar runs via QStash HTTP webhooks back to
+// All async work in Atsar runs via QStash HTTP webhooks back to
 // `/api/jobs/*` route handlers. This module wraps the Upstash SDK with
 // project-aware helpers so callers don't need to remember the base URL or
 // signing options.

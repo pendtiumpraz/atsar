@@ -78,7 +78,7 @@ export default function SubscriptionExpiredPage() {
             </div>
             <CardTitle className="text-2xl">Langganan Anda Telah Berakhir</CardTitle>
             <CardDescription>
-              Untuk melanjutkan akses ke Athar, silakan perpanjang langganan Anda.
+              Untuk melanjutkan akses ke Atsar, silakan perpanjang langganan Anda.
             </CardDescription>
           </CardHeader>
 

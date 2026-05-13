@@ -1,4 +1,4 @@
-# Athar — Database Architecture & Relations
+# Atsar — Database Architecture & Relations
 
 > Schema PostgreSQL 16+ dengan PostGIS (geospatial) + pgvector (RAG).
 > ORM: Drizzle ORM. Migrations versioned.

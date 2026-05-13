@@ -81,7 +81,7 @@ function Logo({ collapsed }: { collapsed: boolean }) {
         'flex items-center gap-2 px-4 py-5',
         collapsed && 'justify-center px-2',
       )}
-      aria-label="Athar"
+      aria-label="Atsar"
     >
       <span
         lang="ar"
@@ -93,7 +93,7 @@ function Logo({ collapsed }: { collapsed: boolean }) {
       </span>
       {!collapsed && (
         <span className="text-sm font-semibold tracking-wide text-[rgb(var(--text))]">
-          ATHAR
+          ATSAR
         </span>
       )}
     </div>

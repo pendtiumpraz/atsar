@@ -33,7 +33,7 @@ const TIERS: ReadonlyArray<TierMeta> = [
   {
     slug: 'free',
     name: 'Free',
-    blurb: '30 tokoh sahabat pilihan untuk berkenalan dengan Athar.',
+    blurb: '30 tokoh sahabat pilihan untuk berkenalan dengan Atsar.',
     features: [
       '30 biografi sahabat pilihan',
       'Peta & timeline (mode terbatas)',

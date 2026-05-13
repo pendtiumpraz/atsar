@@ -126,7 +126,7 @@ export default function WelcomePage() {
     setSaving(true)
     try {
       await persistPreferences()
-      toast.success('Selamat datang di Athar! Trial 3 hari Anda dimulai.')
+      toast.success('Selamat datang di Atsar! Trial 3 hari Anda dimulai.')
       router.push('/dashboard')
     } finally {
       setSaving(false)

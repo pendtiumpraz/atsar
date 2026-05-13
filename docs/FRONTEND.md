@@ -1,4 +1,4 @@
-# Athar — Frontend Architecture & Conventions
+# Atsar — Frontend Architecture & Conventions
 
 > Next.js 15 (App Router) + TypeScript strict.
 > Lihat `WIREFRAMES.md` untuk wireframe per fitur, `UI_UX.md` untuk design system, `BRANDING.md` untuk palette & typography.

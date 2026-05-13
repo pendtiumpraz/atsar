@@ -1,4 +1,4 @@
-// SweetAlert2 wrapper themed for Athar.
+// SweetAlert2 wrapper themed for Atsar.
 //
 // The popup styling pulls colour tokens from CSS variables in `globals.css`
 // (`--bg-elevated`, `--text`, `--accent`, etc.) by way of the `athar-swal-*`

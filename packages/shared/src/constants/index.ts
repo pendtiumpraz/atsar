@@ -1,6 +1,6 @@
 // App-wide constants
 
-export const APP_NAME = 'Athar'
+export const APP_NAME = 'Atsar'
 export const APP_NAME_AR = 'أثر'
 export const APP_TAGLINE_ID = 'Jejak generasi terbaik, dalam genggamanmu.'
 export const APP_TAGLINE_AR = 'آثار خير القرون بين يديك'

@@ -1,6 +1,6 @@
-# Athar — References & Sources
+# Atsar — References & Sources
 
-> Konsolidasi semua referensi yang dipakai untuk keputusan teknis & data dalam dokumentasi Athar.
+> Konsolidasi semua referensi yang dipakai untuk keputusan teknis & data dalam dokumentasi Atsar.
 > Semua verifikasi via web search dilakukan **13 Mei 2026**.
 > Bila ada perubahan tools/model, update dokumen ini + dokumen terkait.
 
@@ -114,7 +114,7 @@
 - [Vis Timeline Examples](https://visjs.github.io/vis-timeline/examples/timeline/)
 - [Comparing the Best React Timeline Libraries — Bugpilot](https://www.bugpilot.com/guides/en/comparing-the-best-react-timeline-libraries-6f66)
 
-**Pilihan Athar**: vis-timeline (komparasi multi-lane) + react-chrono (storytelling tunggal) + visx (custom Ulama Salaf).
+**Pilihan Atsar**: vis-timeline (komparasi multi-lane) + react-chrono (storytelling tunggal) + visx (custom Ulama Salaf).
 
 ### B.2 Maps
 - [Mapbox vs Leaflet vs MapLibre 2026 — PkgPulse](https://www.pkgpulse.com/guides/mapbox-vs-leaflet-vs-maplibre-interactive-maps-2026)
@@ -124,7 +124,7 @@
 - [Super 6 React Map Library — ThemeSelection](https://themeselection.com/blog/react-map-library/)
 - [Best React Map Libraries (Retool)](https://retool.com/blog/react-map-library)
 
-**Pilihan Athar**: MapLibre GL JS + react-map-gl (default), Leaflet sebagai fallback.
+**Pilihan Atsar**: MapLibre GL JS + react-map-gl (default), Leaflet sebagai fallback.
 
 ### B.3 Notifications & Modals
 - [Top 9 React notification libraries 2026 — Knock](https://knock.app/blog/the-top-notification-libraries-for-react)
@@ -135,7 +135,7 @@
 - [Shadcn Sonner](https://www.shadcn.io/ui/sonner)
 - [Toast Messages in React Server Components — BuildUI](https://buildui.com/posts/toast-messages-in-react-server-components)
 
-**Pilihan Athar**: SweetAlert2 untuk modal konfirmasi (user instruction) + Sonner untuk toast (shadcn standard).
+**Pilihan Atsar**: SweetAlert2 untuk modal konfirmasi (user instruction) + Sonner untuk toast (shadcn standard).
 
 ### B.4 PDF Generation (Arabic Support)
 - [HTML to PDF benchmark 2026 — pdf4.dev](https://pdf4.dev/blog/html-to-pdf-benchmark-2026)
@@ -151,7 +151,7 @@
 - [WeasyPrint RTL Support Issue](https://github.com/Kozea/WeasyPrint/issues/106)
 - [RTL Typography Guide (DTP Labs)](https://www.dtplabs.com/blog/rtl-typography-complete-guide-arabic-hebrew-farsi)
 
-**Pilihan Athar**: Puppeteer di worker dengan font Arab pre-installed di Docker image (Amiri, Cairo, Noto Naskh, fonts-kacst). WeasyPrint sebagai fallback evaluation.
+**Pilihan Atsar**: Puppeteer di worker dengan font Arab pre-installed di Docker image (Amiri, Cairo, Noto Naskh, fonts-kacst). WeasyPrint sebagai fallback evaluation.
 
 ---
 
@@ -304,7 +304,7 @@ Sumber online untuk kitab rijal: dorar.net (mausu'ah rijal), shamela.ws.
 
 ## G. Brand Reference
 
-- [Athar (أثر) — Arti dalam bahasa Arab — Wiktionary](https://en.wiktionary.org/wiki/%D8%A3%D8%AB%D8%B1)
+- [Atsar (أثر) — Arti dalam bahasa Arab — Wiktionary](https://en.wiktionary.org/wiki/%D8%A3%D8%AB%D8%B1)
 - [Arab Naskh Calligraphy — Wikipedia](https://en.wikipedia.org/wiki/Naskh_(script))
 - [Reem Kufi — Modern Kufic typeface](https://fonts.google.com/specimen/Reem+Kufi)
 

@@ -9,12 +9,12 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: {
-    default: 'Athar — Jejak generasi terbaik, dalam genggamanmu.',
-    template: '%s · Athar',
+    default: 'Atsar — Jejak generasi terbaik, dalam genggamanmu.',
+    template: '%s · Atsar',
   },
   description:
     'Aplikasi sirah para Nabi, Sahabat, dan ulama salaf — dengan timeline, peta interaktif, dan AI deep research bersumber salaf.',
-  applicationName: 'Athar',
+  applicationName: 'Atsar',
 }
 
 export default function RootLayout({

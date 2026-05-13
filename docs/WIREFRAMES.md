@@ -1,4 +1,4 @@
-# Athar — Wireframes & Tech Per Fitur
+# Atsar — Wireframes & Tech Per Fitur
 
 > ASCII wireframe (LTR layout, beberapa juga punya RTL note) + library/teknologi yang dipakai per fitur.
 > Lihat `FRONTEND.md` untuk pattern umum, `UI_UX.md` untuk design system.
@@ -17,11 +17,11 @@
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│ [أثر ATHAR]                  Tokoh ▾  Peta  Pricing  [Login] │
+│ [أثر ATSAR]                  Tokoh ▾  Peta  Pricing  [Login] │
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │              أ ث ر                                          │
-│              ATHAR                                          │
+│              ATSAR                                          │
 │                                                            │
 │   Jejak generasi terbaik, dalam genggamanmu.                │
 │                                                            │
@@ -44,7 +44,7 @@
 │  [Free] [Sampler 29k] [Basic 99k] [Pro 299k] [Premium 499k] │
 │  → klik kartu = scroll ke halaman pricing detail            │
 ├────────────────────────────────────────────────────────────┤
-│  Footer: Athar, kontak Galih (WA 0813-1950-4441), T&C       │
+│  Footer: Atsar, kontak Galih (WA 0813-1950-4441), T&C       │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -64,7 +64,7 @@
 ```
 ┌──────────────────────────────────┐
 │           أ ث ر                   │
-│         Masuk ke Athar            │
+│         Masuk ke Atsar            │
 │                                  │
 │  Email     <__________________>   │
 │  Password  <__________________> 👁│
@@ -624,7 +624,7 @@ Klik [Preview PDF] → iframe popup dengan rendering 5 halaman pertama (faster).
 ```
 Template Klasik                Template Modern
 ┌──────────────┐               ┌──────────────┐
-│   أ ث ر       │               │   ATHAR      │
+│   أ ث ر       │               │   ATSAR      │
 │              │               │              │
 │   كتاب       │               │  Khulafa     │
 │  الخلفاء     │               │  ar-Rasyidin │
@@ -900,7 +900,7 @@ User instruction: **side-by-side dengan sumber, klik citation → buka halaman s
 ┌────────────────────────────────────────────────────────────┐
 │ ◀ Antrian   Review: Abu Bakr ash-Shiddiq RA      [Diff v1↔2]│
 ├──────────────────────────────────┬─────────────────────────┤
-│ SUMBER (live fetch)              │ KONTEN ATHAR (draft)    │
+│ SUMBER (live fetch)              │ KONTEN ATSAR (draft)    │
 │ islamqa.info/123 [↗ buka tab]    │                         │
 │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │ ━━━━━━━━━━━━━━━━━━━━━━━━│
 │ <iframe sandbox>                  │ # Abu Bakr ash-Shiddiq  │
@@ -1090,7 +1090,7 @@ User instruction: **kalau subscription habis, hanya bisa lihat halaman bayar**.
 ┌────────────────────────────────────────────────────────────┐
 │           ⏳ Langganan Anda Telah Berakhir                  │
 │                                                            │
-│   Untuk melanjutkan akses ke Athar, silakan perpanjang     │
+│   Untuk melanjutkan akses ke Atsar, silakan perpanjang     │
 │   langganan Anda.                                          │
 │                                                            │
 │   Tier sebelumnya: Premium                                  │

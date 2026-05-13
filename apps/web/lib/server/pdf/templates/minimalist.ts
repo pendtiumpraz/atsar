@@ -34,7 +34,7 @@ export function buildHtml(input: TemplateInput): string {
 
   const cover = `
     <section class="cover">
-      <p class="cover-tag">Athar &middot; Sirah PDF</p>
+      <p class="cover-tag">Atsar &middot; Sirah PDF</p>
       <h1 class="cover-title-ar" lang="ar" dir="rtl">${escapeHtml(titleAr ?? 'كتاب السيرة')}</h1>
       ${titleId ? `<h2 class="cover-title-id">${escapeHtml(titleId)}</h2>` : ''}
       <div class="cover-rule"></div>
@@ -66,7 +66,7 @@ export function buildHtml(input: TemplateInput): string {
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(titleId ?? titleAr ?? 'Athar — Sirah PDF')}</title>
+  <title>${escapeHtml(titleId ?? titleAr ?? 'Atsar — Sirah PDF')}</title>
   ${fontImports()}
   <style>
     ${paletteCss()}

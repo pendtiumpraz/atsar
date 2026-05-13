@@ -1,5 +1,5 @@
 /**
- * Athar — App shell organisms barrel.
+ * Atsar — App shell organisms barrel.
  * See docs/UI_UX.md §4–5, docs/WIREFRAMES.md §4.
  */
 

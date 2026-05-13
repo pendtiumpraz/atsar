@@ -1,4 +1,4 @@
-// Athar worker entry — boots BullMQ workers.
+// Atsar worker entry — boots BullMQ workers.
 // Full job implementations land in Phase 2.8 + 3.
 
 import 'dotenv/config'
@@ -10,7 +10,7 @@ const logger = pino({
 })
 
 async function main() {
-  logger.info('Athar worker starting...')
+  logger.info('Atsar worker starting...')
 
   // TODO Phase 2.8: register BullMQ workers here.
   //   import { Worker } from 'bullmq'
@@ -18,7 +18,7 @@ async function main() {
   //   new Worker('research', researchProcessor, { connection: redis })
   //   ...
 
-  logger.info('Athar worker ready (skeleton). Waiting for Phase 2.8 jobs.')
+  logger.info('Atsar worker ready (skeleton). Waiting for Phase 2.8 jobs.')
 
   // Keep process alive for now.
   setInterval(() => {

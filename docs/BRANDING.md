@@ -1,4 +1,4 @@
-# Athar — Branding Guidelines
+# Atsar — Branding Guidelines
 
 > Brand foundation document. Update di sini bila ada perubahan.
 > Cross-reference: lihat `docs/IDEAS.md` untuk fitur produk.
@@ -7,11 +7,11 @@
 
 ## 1. Nama Brand
 
-**Athar** (Arab: **أثر**)
+**Atsar** (Arab: **أثر**)
 
 - Makna: "jejak", "warisan", "yang ditinggalkan".
 - Pengucapan: /ʔaθar/ — "ATH-ar" (dua suku kata).
-- Transliterasi resmi: **Athar** (bukan "Atsar", "Asar", atau variasi lain).
+- Transliterasi resmi: **Atsar** (bukan "Atsar", "Asar", atau variasi lain).
 - Logogram Arab: **أثر** — selalu ditulis tanpa harakat.
 
 ### Alasan Pemilihan
@@ -244,7 +244,7 @@ Button         Inter                 15 px      SemiBold 1
             │                 │
             │       أثر       │   ← Amiri, 1.5–2× Latin size
             │                 │
-            │      ATHAR      │   ← Playfair Display, letterspacing +50
+            │      ATSAR      │   ← Playfair Display, letterspacing +50
             │                 │
             └─────────────────┘
 ```
@@ -363,7 +363,7 @@ Belum jadi prioritas, tapi placeholder:
 | Favicon | Iconmark (kaligrafi أثر) |
 | App icon (iOS/Android) | Iconmark dalam square Emerald background |
 | PDF cover | Logo gold variant + judul Arab kaligrafi |
-| PDF footer | Watermark "Dibuat oleh Athar" + iconmark mini |
+| PDF footer | Watermark "Dibuat oleh Atsar" + iconmark mini |
 | Social card (OG image) | Logo + tagline + palet penuh |
 | Loading state | Iconmark + subtle pulse |
 | Email signature admin | Logo horizontal + kontak Galih |
@@ -374,7 +374,7 @@ Belum jadi prioritas, tapi placeholder:
 
 - [ ] Cek availability domain: `athar.app`, `athar.id`, `athar.com`.
 - [ ] Cek handle social media: `@athar.app` / `@athar.id` di IG, X, TikTok, YouTube.
-- [ ] Trademark check di DJKI (Direktorat Jenderal Kekayaan Intelektual) untuk nama "Athar".
+- [ ] Trademark check di DJKI (Direktorat Jenderal Kekayaan Intelektual) untuk nama "Atsar".
 - [ ] Final logo file: pesan ke desainer atau generate via Figma + AI dengan brief di atas.
 - [ ] Buat sample design (mockup hero + dashboard + cover PDF) sebelum koding UI.
-- [ ] Tentukan apakah ada **brand secondary** (sub-brand untuk admin panel? misal "Athar Studio")?
+- [ ] Tentukan apakah ada **brand secondary** (sub-brand untuk admin panel? misal "Atsar Studio")?

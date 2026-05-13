@@ -48,7 +48,7 @@ export function buildHtml(input: TemplateInput): string {
         </div>
       </div>
       <footer class="cover-footer">
-        <span>Dibuat oleh Athar</span>
+        <span>Dibuat oleh Atsar</span>
         <span class="dot">&middot;</span>
         <span>athar.id</span>
       </footer>
@@ -75,7 +75,7 @@ export function buildHtml(input: TemplateInput): string {
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(titleId ?? titleAr ?? 'Athar — Sirah PDF')}</title>
+  <title>${escapeHtml(titleId ?? titleAr ?? 'Atsar — Sirah PDF')}</title>
   ${fontImports()}
   <style>
     ${paletteCss()}

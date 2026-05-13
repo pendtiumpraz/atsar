@@ -1,7 +1,7 @@
 // Marketing landing hero.
 //
 // Server component. Renders:
-//   - The Athar kaligrafi mark (Arabic أثر big, Latin ATHAR small).
+//   - The Atsar kaligrafi mark (Arabic أثر big, Latin ATSAR small).
 //   - Indonesian tagline (display) + Arabic tagline (companion).
 //   - Two CTAs: trial sign-up and a "see the map demo" deep link.
 //
@@ -52,7 +52,7 @@ export function MarketingHero() {
           className="athar-hero-fade athar-hero-fade-delay-1 mt-3 text-2xl font-semibold tracking-[0.4em] text-[rgb(var(--text-muted))] sm:text-3xl"
           style={{ fontFamily: 'var(--font-display-latin)' }}
         >
-          ATHAR
+          ATSAR
         </h1>
 
         <p

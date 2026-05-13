@@ -1,4 +1,4 @@
-# Athar — Technical Architecture (Vercel + Serverless)
+# Atsar — Technical Architecture (Vercel + Serverless)
 
 > **Updated 2026-05-13**: Pindah dari Hetzner VPS self-host → **Vercel serverless** (per keputusan deploy user). Worker BullMQ → **QStash (Upstash)**. Lihat REFERENCES.md untuk justifikasi pilihan.
 

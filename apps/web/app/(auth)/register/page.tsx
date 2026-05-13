@@ -11,7 +11,7 @@ import { RegisterForm } from '@/components/auth/register-form'
 
 export const metadata: Metadata = {
   title: 'Daftar',
-  description: 'Buat akun Athar baru dan mulai trial 3 hari.',
+  description: 'Buat akun Atsar baru dan mulai trial 3 hari.',
 }
 
 export default function RegisterPage() {

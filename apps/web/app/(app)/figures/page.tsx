@@ -20,7 +20,7 @@ import { ListDetailShell } from '@/components/figures/list-detail-shell'
 export const metadata: Metadata = {
   title: 'Tokoh',
   description:
-    'Jelajahi koleksi tokoh Nabi, Sahabat, Tabi\'in, dan ulama salaf di Athar.',
+    'Jelajahi koleksi tokoh Nabi, Sahabat, Tabi\'in, dan ulama salaf di Atsar.',
 }
 
 // Next 15: `searchParams` is async.

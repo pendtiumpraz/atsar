@@ -701,7 +701,7 @@ Saat ustadz membuka konten untuk direview:
 
 ```
 ┌────────────────────────────────┬────────────────────────────────┐
-│  SUMBER ASLI (websumber)       │  KONTEN ATHAR                  │
+│  SUMBER ASLI (websumber)       │  KONTEN ATSAR                  │
 │  ───────────────────────────   │  ───────────────────────────   │
 │  [embed / live-fetch halaman   │  Biografi yang akan dipublish, │
 │   atau text excerpt dalam Arab │  dwi-bahasa (AR + ID).         │
@@ -716,8 +716,8 @@ Saat ustadz membuka konten untuk direview:
 [ ✓ APPROVE ]   [ ✎ REQUEST EDIT ]   [ ✗ REJECT ]
 ```
 
-- **Klik citation link** → split-view: panel kanan menampilkan halaman sumber **langsung dari website asli** (iframe atau live-fetch terbaru), panel kiri konten Athar.
-- Ustadz bisa **highlight bagian** konten Athar untuk komentar inline.
+- **Klik citation link** → split-view: panel kanan menampilkan halaman sumber **langsung dari website asli** (iframe atau live-fetch terbaru), panel kiri konten Atsar.
+- Ustadz bisa **highlight bagian** konten Atsar untuk komentar inline.
 - **Diff view** otomatis bila konten sudah pernah direvisi (revision 1 vs revision 2).
 
 ### 5c.5 AI-Assisted Edit (Ustadz → Instruksi → AI → Konten)

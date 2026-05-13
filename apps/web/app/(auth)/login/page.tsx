@@ -12,14 +12,14 @@ import { LoginForm } from '@/components/auth/login-form'
 
 export const metadata: Metadata = {
   title: 'Masuk',
-  description: 'Masuk ke akun Athar Anda.',
+  description: 'Masuk ke akun Atsar Anda.',
 }
 
 export default function LoginPage() {
   return (
     <Card>
       <CardHeader className="space-y-1 text-center">
-        <CardTitle className="text-2xl">Masuk ke Athar</CardTitle>
+        <CardTitle className="text-2xl">Masuk ke Atsar</CardTitle>
         <CardDescription>
           Lanjutkan perjalanan belajar sirah Anda.
         </CardDescription>

@@ -1,4 +1,4 @@
-// Browser-side fetch wrapper for the Athar HTTP API.
+// Browser-side fetch wrapper for the Atsar HTTP API.
 //
 // - Always prepends `/api/v1` unless the caller passes a path that already
 //   starts with `/api/` (escape hatch for non-v1 endpoints like /api/auth or

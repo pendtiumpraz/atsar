@@ -1,6 +1,6 @@
 // Feature grid for the landing page.
 //
-// Four cards highlighting Athar's USP per WIREFRAMES §1 + IDEAS:
+// Four cards highlighting Atsar's USP per WIREFRAMES §1 + IDEAS:
 //   1. Timeline komparasi   — visualisasi sumbu waktu Hijri/Masehi.
 //   2. Peta interaktif      — geo-historis perang, hijrah, rihlah.
 //   3. PDF Book Generator    — buku biografi salaf siap cetak.

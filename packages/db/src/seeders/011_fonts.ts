@@ -15,8 +15,8 @@ const FONTS: Array<{
   license?: string
 }> = [
   // ─── Defaults (active) ────────────────────────────────────────────
-  { name: 'Playfair Display', family: 'Playfair Display', script: 'latin', googleFamilyName: 'Playfair Display', weights: [400, 600, 700, 900], styles: ['normal', 'italic'], isActive: true, license: 'OFL', previewTextId: 'Athar — Jejak generasi terbaik.' },
-  { name: 'Inter', family: 'Inter', script: 'latin', googleFamilyName: 'Inter', weights: [400, 500, 600, 700], styles: ['normal'], isActive: true, license: 'OFL', previewTextId: 'Athar — Jejak generasi terbaik.' },
+  { name: 'Playfair Display', family: 'Playfair Display', script: 'latin', googleFamilyName: 'Playfair Display', weights: [400, 600, 700, 900], styles: ['normal', 'italic'], isActive: true, license: 'OFL', previewTextId: 'Atsar — Jejak generasi terbaik.' },
+  { name: 'Inter', family: 'Inter', script: 'latin', googleFamilyName: 'Inter', weights: [400, 500, 600, 700], styles: ['normal'], isActive: true, license: 'OFL', previewTextId: 'Atsar — Jejak generasi terbaik.' },
   { name: 'Amiri', family: 'Amiri', script: 'arabic', googleFamilyName: 'Amiri', weights: [400, 700], styles: ['normal', 'italic'], isActive: true, license: 'OFL', previewTextAr: 'بسم الله الرحمن الرحيم' },
   { name: 'Reem Kufi', family: 'Reem Kufi', script: 'arabic', googleFamilyName: 'Reem Kufi', weights: [400, 500, 600, 700], styles: ['normal'], isActive: true, license: 'OFL', previewTextAr: 'أثر' },
   { name: 'Cairo', family: 'Cairo', script: 'arabic', googleFamilyName: 'Cairo', weights: [400, 500, 600, 700], styles: ['normal'], isActive: true, license: 'OFL', previewTextAr: 'أثر السلف الصالح' },

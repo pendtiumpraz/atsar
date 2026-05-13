@@ -5,7 +5,7 @@ import Link from 'next/link'
  * Auth layout — centered single-column shell used by:
  *   /login, /register, /verify-email, /forgot-password, /reset-password
  *
- * No sidebar/navbar (per WIREFRAMES §2). The Athar wordmark is shown at the
+ * No sidebar/navbar (per WIREFRAMES §2). The Atsar wordmark is shown at the
  * top, the page content is rendered inside a centered card. Dark/light is
  * inherited automatically via the `data-theme` attribute on `<html>`.
  */
@@ -18,7 +18,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       <Link
         href="/"
         className="mb-8 flex flex-col items-center gap-1 text-center"
-        aria-label="Athar — kembali ke beranda"
+        aria-label="Atsar — kembali ke beranda"
       >
         <span
           className="text-5xl leading-none"
@@ -38,7 +38,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             color: 'rgb(var(--text))',
           }}
         >
-          ATHAR
+          ATSAR
         </span>
       </Link>
 
@@ -48,7 +48,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         className="mt-8 text-center text-xs"
         style={{ color: 'rgb(var(--text-faint))' }}
       >
-        © Athar — Jejak generasi terbaik, dalam genggamanmu.
+        © Atsar — Jejak generasi terbaik, dalam genggamanmu.
       </p>
     </main>
   )

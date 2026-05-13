@@ -267,7 +267,7 @@ export default function PricingPage() {
               Pembayaran tidak dapat dikembalikan
             </p>
             <p className="mt-1 text-[rgb(var(--text-muted))]">
-              Semua langganan Athar bersifat non-refundable. Mohon pastikan
+              Semua langganan Atsar bersifat non-refundable. Mohon pastikan
               tier dan periode yang dipilih sudah benar sebelum melakukan
               transfer. Selengkapnya di{' '}
               <Link

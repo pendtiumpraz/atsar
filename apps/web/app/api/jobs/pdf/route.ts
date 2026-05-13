@@ -160,7 +160,7 @@ export const POST = withSignature(async (req) => {
     const html = builder({
       titleAr: job.titleAr,
       titleId: job.titleId,
-      authorName: job.authorName ?? 'Athar',
+      authorName: job.authorName ?? 'Atsar',
       authorEmail: job.authorEmail ?? 'noreply@athar.id',
       figures: rich,
       languageMode: job.languageMode,

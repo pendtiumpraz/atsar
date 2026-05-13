@@ -1,4 +1,4 @@
-# Athar — UI/UX Design System
+# Atsar — UI/UX Design System
 
 > Pelengkap BRANDING.md (palette, typography) dan WIREFRAMES.md (layout per fitur). Doc ini fokus ke **design tokens, atomic component spec, dan interaksi**.
 
@@ -265,7 +265,7 @@ User instruction: **1 warna icon**.
 ### Expanded (240px)
 ```
 ┌──────────────────────────┐
-│  [logo أ ث ر ATHAR]      │  (header, padding-y 6)
+│  [logo أ ث ر ATSAR]      │  (header, padding-y 6)
 ├──────────────────────────┤
 │  📊  Dashboard           │  (item padding-x 4, py 3, gap 3)
 │  👥  Tokoh           ▾   │  (active state: subtle bg + accent text)

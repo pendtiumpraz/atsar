@@ -9,7 +9,7 @@ export default function NotFound() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[rgb(var(--bg))] px-4 py-16 text-center text-[rgb(var(--text))]">
       <div className="flex flex-col items-center gap-6">
-        {/* Athar brand mark */}
+        {/* Atsar brand mark */}
         <div className="flex items-center gap-3">
           <span
             className="text-5xl leading-none"

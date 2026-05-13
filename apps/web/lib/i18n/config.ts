@@ -1,5 +1,5 @@
 /**
- * Active UI locales for the Athar web app.
+ * Active UI locales for the Atsar web app.
  *
  * Note: the shared `Locale` type in `@athar/shared` also includes `'en'`, but
  * English is not yet wired into the UI message catalogs. Keep this list in sync

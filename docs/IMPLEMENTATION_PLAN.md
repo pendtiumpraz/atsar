@@ -1,4 +1,4 @@
-# Athar — Implementation Plan
+# Atsar — Implementation Plan
 
 > Step-by-step implementation dengan progress checklist.
 > **Aturan utama**:
@@ -238,7 +238,7 @@
 - [x] **3.7.3** 4 HTML templates: classic/modern/calligraphy/minimalist (P3-4)
 - [x] **3.7.4** Timeline mini (SVG), map placeholder, illustrations (P3-4)
 - [x] **3.7.5** Endpoint `/api/v1/pdf/jobs` create + status + list (P3-4)
-- [x] **3.7.6** Watermark + footer "Dibuat oleh Athar" (P3-4)
+- [x] **3.7.6** Watermark + footer "Dibuat oleh Atsar" (P3-4)
 - [ ] **3.7.7** Upload hasil ke Vercel Blob/R2 + notif — currently stubbed (P3-4 marked TODO)
 
 ### 3.8 Fonts Admin

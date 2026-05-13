@@ -1,4 +1,4 @@
-// Typed endpoint helpers for the Athar HTTP API.
+// Typed endpoint helpers for the Atsar HTTP API.
 //
 // Keep this file thin: each helper just translates a call site (resource +
 // params) into an `api()` call. Response types are intentionally loose

@@ -41,7 +41,7 @@ export function buildHtml(input: TemplateInput): string {
       <p class="cover-author">${escapeHtml(authorName)}</p>
       <p class="cover-email">${escapeHtml(authorEmail)}</p>
       <div class="cover-ornament bottom"></div>
-      <footer class="cover-footer">Dibuat oleh Athar &middot; athar.id</footer>
+      <footer class="cover-footer">Dibuat oleh Atsar &middot; athar.id</footer>
     </section>
   `
 
@@ -65,7 +65,7 @@ export function buildHtml(input: TemplateInput): string {
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(titleId ?? titleAr ?? 'Athar — Sirah PDF')}</title>
+  <title>${escapeHtml(titleId ?? titleAr ?? 'Atsar — Sirah PDF')}</title>
   ${fontImports()}
   <style>
     ${paletteCss()}
