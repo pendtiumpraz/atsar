@@ -8,7 +8,7 @@
 // captureException(err, { route: '/api/foo', userId })
 // ```
 
-import { logger } from './logger.js'
+import { logger } from './logger'
 
 /** Minimal shape we use from `@sentry/nextjs`. */
 type SentryLike = {

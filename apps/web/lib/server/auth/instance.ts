@@ -35,14 +35,24 @@ export const auth = betterAuth({
   ...(authConfig.trustedOrigins ? { trustedOrigins: authConfig.trustedOrigins } : {}),
 
   // Drizzle adapter pointed at the Postgres schema exported by @athar/db.
-  // `usePlural: true` because our exported keys are `users`, `sessions`, etc.
+  // We pass plural model names explicitly via each entity's `modelName`
+  // (users / sessions / accounts / verifications), so usePlural MUST be
+  // false — otherwise the adapter doubles up and looks for "userss".
   database: drizzleAdapter(db, {
     provider: 'pg',
-    usePlural: true,
   }),
 
   emailAndPassword: authConfig.emailAndPassword,
-  advanced: authConfig.advanced,
+  advanced: {
+    ...authConfig.advanced,
+    // Our schema uses `uuid` columns for every `id` (users, sessions, accounts,
+    // verifications). Better-auth's default ID generator emits 32-char nanoid
+    // strings that fail Postgres UUID validation. Force RFC-4122 UUIDs so the
+    // INSERT succeeds.
+    database: {
+      generateId: () => crypto.randomUUID(),
+    },
+  },
 
   // Better-auth's drizzle adapter resolves columns via the Drizzle table's
   // JS property keys (camelCase) — NOT the underlying SQL column names. Our
