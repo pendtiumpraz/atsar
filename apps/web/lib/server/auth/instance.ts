@@ -44,17 +44,22 @@ export const auth = betterAuth({
   emailAndPassword: authConfig.emailAndPassword,
   advanced: authConfig.advanced,
 
-  // Map better-auth's canonical fields onto our column names. All four
-  // tables better-auth touches (users, sessions, accounts, verifications)
-  // are listed so the adapter can resolve snake_case columns.
+  // Better-auth's drizzle adapter resolves columns via the Drizzle table's
+  // JS property keys (camelCase) — NOT the underlying SQL column names. Our
+  // schema already uses camelCase keys that match better-auth's canonical
+  // field names (userId, emailVerified, expiresAt, etc.), so the only fields
+  // that genuinely need re-mapping are the two whose Drizzle key differs
+  // from better-auth's expected name: `name` (we use `fullName`) and `image`
+  // (we use `avatarUrl`).
+  //
+  // Previously we passed snake_case SQL names (`full_name`, `user_id`, …)
+  // which caused `table[fieldName]` lookups to resolve to `undefined` and
+  // crashed sign-in with a 500. See commit history for the diagnosis.
   user: {
     modelName: 'users',
     fields: {
-      name: 'full_name',
-      image: 'avatar_url',
-      emailVerified: 'email_verified',
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
+      name: 'fullName',
+      image: 'avatarUrl',
     },
   },
   session: {
@@ -62,37 +67,12 @@ export const auth = betterAuth({
     expiresIn: authConfig.session.expiresIn,
     updateAge: authConfig.session.updateAge,
     cookieCache: authConfig.session.cookieCache,
-    fields: {
-      userId: 'user_id',
-      expiresAt: 'expires_at',
-      ipAddress: 'ip_address',
-      userAgent: 'user_agent',
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-    },
   },
   account: {
     modelName: 'accounts',
-    fields: {
-      userId: 'user_id',
-      accountId: 'account_id',
-      providerId: 'provider_id',
-      accessToken: 'access_token',
-      refreshToken: 'refresh_token',
-      idToken: 'id_token',
-      accessTokenExpiresAt: 'access_token_expires_at',
-      refreshTokenExpiresAt: 'refresh_token_expires_at',
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-    },
   },
   verification: {
     modelName: 'verifications',
-    fields: {
-      expiresAt: 'expires_at',
-      createdAt: 'created_at',
-      updatedAt: 'updated_at',
-    },
   },
 
   // `nextCookies()` must be the *last* plugin so it can flush Set-Cookie
