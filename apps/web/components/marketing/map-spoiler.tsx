@@ -18,7 +18,7 @@
 //   - Zoom + scale controls; users can zoom out to the world to compare with
 //     modern geography.
 
-import dynamic from 'next/dynamic'
+import { MapSpoilerLoader } from './map-spoiler-loader'
 
 // Region label/color metadata for the legend. Must stay in sync with the
 // `REGIONS` array in `./map-spoiler-interactive`. Kept duplicated (rather than
@@ -34,19 +34,6 @@ const LEGEND_REGIONS: ReadonlyArray<{ label: string; color: string }> = [
   { label: 'Andalusia', color: '#ec4899' },
   { label: 'Maghrib', color: '#84cc16' },
 ]
-
-// Lazy-load the client map. `ssr: false` is required because MapLibre touches
-// `window` synchronously at module load. The skeleton matches the map's final
-// height so the layout doesn't shift when JS hydrates.
-const InteractiveMap = dynamic(
-  () => import('./map-spoiler-interactive').then((m) => m.MapSpoilerInteractive),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-[480px] w-full animate-pulse rounded-lg bg-[rgb(var(--bg-elevated))] sm:h-[560px]" />
-    ),
-  },
-)
 
 export function MapSpoiler() {
   return (
@@ -75,7 +62,7 @@ export function MapSpoiler() {
         </div>
 
         <figure className="mt-10 overflow-hidden rounded-xl border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 shadow-sm sm:p-6">
-          <InteractiveMap />
+          <MapSpoilerLoader />
 
           {/* Legend — color-coded list of region swatches. Rendered server-side
               so it is visible even before the map JS finishes loading. */}
