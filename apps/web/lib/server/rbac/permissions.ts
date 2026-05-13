@@ -26,8 +26,16 @@ function cacheKey(userId: string): string {
 export async function getEffectivePermissions(userId: string): Promise<Set<string>> {
   const key = cacheKey(userId)
 
-  // 1. Try cache. Upstash decodes JSON automatically; we wrote a string[].
-  const cached = await redis.get<string[] | null>(key)
+  // 1. Try cache. Treat any Redis error (quota exceeded, network blip,
+  // misconfig) as a cache miss — the DB is authoritative anyway. Without
+  // this fallback every API route 500s the moment Upstash returns an
+  // error.
+  let cached: string[] | null = null
+  try {
+    cached = await redis.get<string[] | null>(key)
+  } catch (err) {
+    console.warn('[rbac] redis get failed, falling back to DB:', err)
+  }
   if (Array.isArray(cached)) {
     return new Set(cached)
   }
@@ -50,15 +58,24 @@ export async function getEffectivePermissions(userId: string): Promise<Set<strin
     slugs.add(row.slug)
   }
 
-  // 3. Write through with TTL. Store as plain array for JSON round-trip.
-  await redis.set(key, Array.from(slugs), { ex: CACHE_TTL_SECONDS })
+  // 3. Write through with TTL. Swallow Redis errors — caching is a perf
+  // optimization, not a correctness requirement.
+  try {
+    await redis.set(key, Array.from(slugs), { ex: CACHE_TTL_SECONDS })
+  } catch (err) {
+    console.warn('[rbac] redis set failed, continuing without cache:', err)
+  }
 
   return slugs
 }
 
 /** Drop the cached permission set for `userId`. Call after role changes. */
 export async function invalidatePermissions(userId: string): Promise<void> {
-  await redis.del(cacheKey(userId))
+  try {
+    await redis.del(cacheKey(userId))
+  } catch (err) {
+    console.warn('[rbac] redis del failed (continuing):', err)
+  }
 }
 
 /** Convenience: resolve permissions and test membership in a single call. */
