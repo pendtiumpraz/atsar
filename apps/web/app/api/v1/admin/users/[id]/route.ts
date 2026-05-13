@@ -1,0 +1,44 @@
+// GET    /api/v1/admin/users/[id]   — `users.view`
+// PUT    /api/v1/admin/users/[id]   — `users.update`
+// DELETE /api/v1/admin/users/[id]   — `users.delete` (soft, refuses last admin)
+
+import { z } from 'zod'
+
+import { noContent, ok, validateBody, validateParams, withErrorHandling } from '@/lib/server/api'
+import { requirePermission } from '@/lib/server/rbac'
+import * as userService from '@/lib/server/services/user.service'
+
+const paramsSchema = z.object({ id: z.string().uuid() })
+
+const updateSchema = z.object({
+  fullName: z.string().trim().min(1).max(120).optional(),
+  displayName: z.string().trim().max(120).nullable().optional(),
+  phone: z.string().trim().max(32).nullable().optional(),
+  locale: z.enum(['id', 'ar', 'en']).optional(),
+})
+
+type RouteCtx = { params: Promise<{ id: string }> | { id: string } }
+
+export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
+  await requirePermission(req, 'users.view')
+  const { id } = validateParams(await ctx.params, paramsSchema)
+  const row = await userService.getById(id)
+  return ok(row)
+})
+
+export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+  await requirePermission(req, 'users.update')
+  const { id } = validateParams(await ctx.params, paramsSchema)
+  const input = await validateBody(req, updateSchema)
+  // TODO(actor): resolve actorId from session once auth middleware lands.
+  const row = await userService.update(id, input, null)
+  return ok(row)
+})
+
+export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
+  await requirePermission(req, 'users.delete')
+  const { id } = validateParams(await ctx.params, paramsSchema)
+  // TODO(actor): resolve actorId from session once auth middleware lands.
+  await userService.softDelete(id, null)
+  return noContent()
+})
