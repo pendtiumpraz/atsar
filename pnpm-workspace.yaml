@@ -8,6 +8,7 @@ packages:
 # - sharp: true (Next.js image optimization)
 # - esbuild, unrs-resolver: true (dev tools)
 allowBuilds:
+  argon2: false
   esbuild: true
   msgpackr-extract: false
   puppeteer: false
