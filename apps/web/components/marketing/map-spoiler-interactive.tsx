@@ -193,10 +193,13 @@ export const REGIONS: ReadonlyArray<Region> = [
 // ---------------------------------------------------------------------------
 
 function rasterStyle(theme: ResolvedTheme): StyleSpecification {
+  // CARTO basemap URLs — matches `components/map/map-view.tsx`. The earlier
+  // `/raster/voyager/...` path does not exist on CARTO's CDN; the correct
+  // paths are `light_all` / `dark_all` (or `rastertiles/voyager` for Voyager).
   const url =
     theme === 'dark'
-      ? 'https://basemaps.cartocdn.com/raster/dark-matter/{z}/{x}/{y}.png'
-      : 'https://basemaps.cartocdn.com/raster/voyager/{z}/{x}/{y}.png'
+      ? 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
+      : 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
 
   return {
     version: 8,
