@@ -67,6 +67,12 @@ export const auth = betterAuth({
     expiresIn: authConfig.session.expiresIn,
     updateAge: authConfig.session.updateAge,
     cookieCache: authConfig.session.cookieCache,
+    // Better-auth writes the session token under the field name `token`;
+    // our Drizzle key is `tokenHash`. Without this mapping the adapter
+    // crashes at `checkMissingFields` and returns a 500 with empty body.
+    fields: {
+      token: 'tokenHash',
+    },
   },
   account: {
     modelName: 'accounts',
