@@ -190,9 +190,16 @@ Hasilkan output JSON sesuai schema. Jangan menjawab dalam prosa.`
     // synthesis task, not a factual recall task. We want different diction
     // every reroll, so the user can keep clicking "Generate dari AI" until
     // they find one they like.
-    temperature: 0.95,
+    temperature: 0.9,
     topP: 0.95,
-    maxTokens: 400,
+    // Token budget scales with the number of figures: more figures =
+    // bigger schema scaffold + more candidate diction. Base 600 covers
+    // the JSON wrap + 1 figure; +400 per additional figure. Clamp 600
+    // (single fig) to 4000 (full 30-fig batch). Generous enough to
+    // never trigger AI_JSONParseError ("Unexpected end of JSON input"
+    // when finishReason='length'); tight enough that boncos prompts
+    // get caught early.
+    maxTokens: Math.min(4000, 600 + rows.length * 400),
     maxRetries: 1,
   })
 
