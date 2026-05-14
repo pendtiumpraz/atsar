@@ -13,6 +13,7 @@
 
 import type { Metadata } from 'next'
 
+import { FigureCategoryTabs } from '@/components/figures/figure-category-tabs'
 import { FigureFilterBar } from '@/components/figures/figure-filter-bar'
 import { FigureGrid } from '@/components/figures/figure-grid'
 import { ListDetailShell } from '@/components/figures/list-detail-shell'
@@ -57,6 +58,7 @@ export default async function FiguresPage({ searchParams }: FiguresPageProps) {
         </h1>
       </div>
 
+      <FigureCategoryTabs />
       <FigureFilterBar />
 
       <ListDetailShell

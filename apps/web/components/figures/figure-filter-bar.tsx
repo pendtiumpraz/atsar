@@ -18,20 +18,9 @@ import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-// Hand-curated list of figure categories. Slugs MUST match the seed in
-// `packages/db/src/seeders/008_figure_categories.ts` — diverging here
-// silently returns empty result sets (the API filters by exact slug).
-// Shahabiyat aren't a separate category in the DB; users get them by
-// combining category=sahabat with gender=female.
-const CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: '', label: 'Semua Kategori' },
-  { value: 'nabi', label: 'Nabi & Rasul' },
-  { value: 'shalih_pre_rasul', label: 'Shalih sebelum Rasul ﷺ' },
-  { value: 'sahabat', label: 'Sahabat & Shahabiyat' },
-  { value: 'tabiin', label: "Tabi'in" },
-  { value: 'tabiut_tabiin', label: "Tabi'ut Tabi'in" },
-  { value: 'shalih_pasca_rasul', label: 'Ulama Salaf (Pasca Rasul ﷺ)' },
-]
+// Category selection moved to `<FigureCategoryTabs>` (rendered above this
+// bar by the parent page). Gender stays as a dropdown because it can be
+// orthogonal to any category.
 
 const GENDER_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: '', label: 'Semua Gender' },
@@ -89,6 +78,9 @@ export function FigureFilterBar({ className }: FigureFilterBarProps) {
 
   const category = searchParams.get('category') ?? ''
   const gender = searchParams.get('gender') ?? ''
+  // Shahabiyat tab locks the gender filter; hide the dropdown to avoid
+  // confusion (user can switch tabs to change the gender bucket).
+  const genderLocked = category === 'sahabat' && gender === 'female'
 
   return (
     <div
@@ -112,20 +104,16 @@ export function FigureFilterBar({ className }: FigureFilterBarProps) {
         />
       </div>
 
-      <div className="flex gap-2 sm:gap-2">
-        <FilterSelect
-          ariaLabel="Filter kategori"
-          value={category}
-          onChange={(v) => pushFilter('category', v)}
-          options={CATEGORY_OPTIONS}
-        />
-        <FilterSelect
-          ariaLabel="Filter gender"
-          value={gender}
-          onChange={(v) => pushFilter('gender', v)}
-          options={GENDER_OPTIONS}
-        />
-      </div>
+      {!genderLocked && (
+        <div className="flex gap-2 sm:gap-2">
+          <FilterSelect
+            ariaLabel="Filter gender"
+            value={gender}
+            onChange={(v) => pushFilter('gender', v)}
+            options={GENDER_OPTIONS}
+          />
+        </div>
+      )}
     </div>
   )
 }

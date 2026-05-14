@@ -79,10 +79,13 @@ $RECYCLE.BIN/
 # ─────────────────────────────────────────────────────────
 #  Storage / uploads (local dev only)
 # ─────────────────────────────────────────────────────────
-storage/
-uploads/
-public/uploads/
-public/fonts/cache/
+# Leading slash anchors to repo root — without it, glob matches any
+# directory named `uploads/` and unintentionally ignores source code
+# like `apps/web/lib/server/uploads/`.
+/storage/
+/uploads/
+/public/uploads/
+/public/fonts/cache/
 
 # ─────────────────────────────────────────────────────────
 #  PDF generator output (local)
