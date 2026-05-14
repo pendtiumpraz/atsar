@@ -66,6 +66,7 @@ const MENU: MenuSeed[] = [
   { slug: 'admin-ai', labelId: 'AI Providers', icon: 'Bot', path: '/admin/ai-providers', displayOrder: 220, requiredPermission: 'ai_providers.manage' },
   { slug: 'admin-fonts', labelId: 'Fonts', icon: 'Type', path: '/admin/fonts', displayOrder: 230, requiredPermission: 'fonts.manage' },
   { slug: 'admin-locations', labelId: 'Lokasi', icon: 'MapPin', path: '/admin/locations', displayOrder: 235 },
+  { slug: 'admin-battles', labelId: 'Sirah Perang', icon: 'Swords', path: '/admin/battles', displayOrder: 237, requiredPermission: 'battles.create' },
   { slug: 'admin-whitelist', labelId: 'Whitelist Domain', icon: 'Globe', path: '/admin/whitelist', displayOrder: 240, requiredPermission: 'whitelist.manage' },
   { slug: 'admin-payments', labelId: 'Pembayaran', icon: 'Wallet', path: '/admin/payments', displayOrder: 245, requiredPermission: 'subscriptions.view' },
   { slug: 'admin-subs', labelId: 'Subscriptions', icon: 'CreditCard', path: '/admin/subscriptions', displayOrder: 250, requiredPermission: 'subscriptions.view' },

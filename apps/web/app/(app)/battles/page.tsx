@@ -12,8 +12,12 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { headers } from 'next/headers'
 
 import { BattleCard, type BattleCardData } from '@/components/battles/battle-card'
+import { BattleIngestQuickAdd } from '@/components/battles/battle-ingest-quick-add'
+import { auth } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 import { battleService } from '@/lib/server/services/battle.service'
 
 export const metadata: Metadata = {
@@ -59,6 +63,15 @@ export default async function BattlesPage({ searchParams }: BattlesPageProps) {
   const pageRaw = pick(sp.page)
   const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1
 
+  // Detect admin so we can render the "+ Tambah Perang (AI)" affordance.
+  // Cheap — the surrounding (app) layout has already read the session for
+  // this request.
+  const reqHeaders = await headers()
+  const session = await auth.api.getSession({ headers: reqHeaders })
+  const isAdmin = session?.user?.id
+    ? (await getUserRoleSlugs(session.user.id)).has('admin')
+    : false
+
   // Direct service call — bypasses HTTP layer to avoid an extra round-trip
   // when SSR-rendering. The same gating that protects the route is already
   // applied at the layout level.
@@ -85,9 +98,12 @@ export default async function BattlesPage({ searchParams }: BattlesPageProps) {
         >
           Sirah Perang
         </h1>
-        <span className="text-xs text-[rgb(var(--text-faint))]">
-          {result.total ?? 0} pertempuran
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[rgb(var(--text-faint))]">
+            {result.total ?? 0} pertempuran
+          </span>
+          {isAdmin && <BattleIngestQuickAdd />}
+        </div>
       </div>
 
       <BattlesFilterBar

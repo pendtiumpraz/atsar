@@ -4,3 +4,4 @@
 export * from './whitelist-search.js'
 export * from './fetch.js'
 export * from './extract.js'
+export * from './extract-battle.js'

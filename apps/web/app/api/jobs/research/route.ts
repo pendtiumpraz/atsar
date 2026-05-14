@@ -36,6 +36,7 @@ import {
   battles,
   citations,
   figureCategories,
+  figureRelations,
   figures,
   locations,
   researchJobs,
@@ -83,6 +84,19 @@ const IngestPayload = z.object({
 // without the producer holding state.
 const ReIngestPayload = z.object({
   type: z.literal('figure_reingest'),
+  jobId: z.string().uuid(),
+})
+
+// Battle ingest payload — producer (`/api/v1/admin/battles/ingest`) only
+// sends the `research_jobs.id`; the worker pulls the rest from the row.
+const BattleIngestPayload = z.object({
+  type: z.literal('battle_ingest'),
+  jobId: z.string().uuid(),
+})
+
+// Battle re-ingest payload — refresh an EXISTING battle row.
+const BattleReIngestPayload = z.object({
+  type: z.literal('battle_reingest'),
   jobId: z.string().uuid(),
 })
 
@@ -287,7 +301,7 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     return { ok: false, code: 'internal_error', message }
   }
 
-  const { figureData, citations: cites, modelUsed } = extraction
+  const { figureData, citations: cites, nasabChain, modelUsed } = extraction
 
   // Refuse to insert a row that doesn't even have an Arabic name — that's
   // the "if sources didn't yield this figure" signal.
@@ -355,6 +369,34 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     await db.insert(citations).values(citationInserts)
   }
 
+  // ── 4b. Nasab chain — INSERT figure_relations rows ──────────────────
+  //
+  // The chain is ordered child → parent → grandparent. We walk the list
+  // pairwise (child = previous link, parent = current link) and INSERT
+  // `relation_type='father'` rows of the form (figureId=parent, relatedId=child)
+  // matching the convention in seeders/027_relations.ts.
+  //
+  // Many ancestors won't exist as `figures` rows (Adnan, Qushayy, …). The
+  // `figure_relations` FK requires both ends to be real figures, so we
+  // upsert minimal `shalih_pre_rasul` figure rows for the missing ones
+  // (status='draft' so editorial can curate them).
+  if (nasabChain.length > 0) {
+    try {
+      await insertNasabChain({
+        seedFigureId: row.id,
+        seedFigureName: figureData.nameFullId ?? input.figureName,
+        chain: nasabChain,
+        createdBy: input.createdBy ?? null,
+        log,
+      })
+    } catch (err) {
+      log.warn(
+        { err: (err as Error).message, figureId: row.id },
+        'nasab chain insert failed (non-fatal)',
+      )
+    }
+  }
+
   // ── 5. Reviewer auto-assign (best-effort) ───────────────────────────
   const reviewerId = await pickReviewer()
   if (reviewerId) {
@@ -420,6 +462,16 @@ export const POST = withSignature(async (req) => {
   const reIngestParsed = ReIngestPayload.safeParse(json)
   if (reIngestParsed.success) {
     return handleFigureReIngest(reIngestParsed.data.jobId)
+  }
+
+  const battleIngestParsed = BattleIngestPayload.safeParse(json)
+  if (battleIngestParsed.success) {
+    return handleBattleIngest(battleIngestParsed.data.jobId)
+  }
+
+  const battleReIngestParsed = BattleReIngestPayload.safeParse(json)
+  if (battleReIngestParsed.success) {
+    return handleBattleReIngest(battleReIngestParsed.data.jobId)
   }
 
   const crawlParsed = CrawlPayload.safeParse(json)
@@ -881,6 +933,733 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     sourcesUsed: fetched.length,
     citationsInserted: insertedCitationCount,
   })
+}
+
+// ── battle_ingest ──────────────────────────────────────────────────────
+//
+// Crawl + LLM extract + INSERT a new draft `battles` row, then INSERT
+// per-citation rows scoped to that battle. Mirrors `handleFigureIngest`
+// but uses the battle schema + resolves `locationSlug` / `commanderName`
+// against the existing tables.
+//
+// On `locationSlug` miss: leave `locationId` null and append the AI's
+// suggested name to `eventDateNotes` so the reviewer can map it.
+// On `commanderName` miss: leave `commanderId` null. No fallback.
+
+function battleSlugify(input: string): string {
+  return (
+    input
+      .normalize('NFKD')
+      .replace(/[ؐ-ًؚ-ٰٟۖ-ۭ]/g, '')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .slice(0, 140) || `battle-${Date.now()}`
+  )
+}
+
+async function resolveLocationIdBySlug(slug: string): Promise<string | null> {
+  const row = await db.query.locations.findFirst({
+    where: and(eq(locations.slug, slug), isNull(locations.deletedAt)),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
+async function resolveCommanderIdByName(name: string): Promise<string | null> {
+  const like = `%${name.trim()}%`
+  const row = await db.query.figures.findFirst({
+    where: and(
+      or(ilike(figures.nameFullAr, like), ilike(figures.nameFullId, like))!,
+      isNull(figures.deletedAt),
+    ),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
+async function handleBattleIngest(jobId: string): Promise<Response> {
+  const log = logger.child({ route: '/api/jobs/research', jobType: 'battle_ingest', jobId })
+
+  // 1. Load the job row.
+  const job = await db.query.researchJobs.findFirst({
+    where: eq(researchJobs.id, jobId),
+  })
+  if (!job) {
+    log.warn({ jobId }, 'battle_ingest: job row not found')
+    return Response.json(
+      { ok: false, error: { code: 'NOT_FOUND', message: `research_jobs not found: ${jobId}` } },
+      { status: 404 },
+    )
+  }
+
+  // 2. Idempotency.
+  if (job.status === 'completed') {
+    return Response.json({ ok: true, battleId: job.resultFigureId, alreadyCompleted: true })
+  }
+  if (job.status === 'failed') {
+    return Response.json({
+      ok: false,
+      error: {
+        code: job.errorCode ?? 'INTERNAL_ERROR',
+        message: job.errorMessage ?? 'previous run failed',
+      },
+    })
+  }
+
+  // 3. Mark running.
+  await db
+    .update(researchJobs)
+    .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+    .where(eq(researchJobs.id, jobId))
+
+  // 4. Coerce payload. The producer writes { name, type?, hints? }.
+  const payload = job.payload as {
+    name?: string
+    type?: 'ghazwah' | 'sariyyah' | 'futuhat'
+    hints?: string
+  } | null
+  if (!payload?.name) {
+    const msg = 'payload missing name'
+    await markFailed(jobId, 'internal_error', msg)
+    log.error({ jobId, payload }, msg)
+    return Response.json(
+      { ok: false, error: { code: 'VALIDATION_ERROR', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // 5. Candidate URLs via the same whitelist crawler used for figures.
+  const domains = await loadActiveWhitelist()
+  let candidateUrls = await searchWhitelist(payload.name, domains)
+  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
+
+  // 6. Fetch sources with per-domain rate limiting.
+  const fetched: { url: string; content: string }[] = []
+  for (const url of candidateUrls) {
+    if (fetched.length >= MAX_SOURCES) break
+    try {
+      const res = await fetchPage(url)
+      fetched.push({ url: res.finalUrl, content: res.html })
+    } catch (err) {
+      if (err instanceof RateLimitExceededError) {
+        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
+        await markFailed(jobId, 'rate_limited', err.message)
+        return Response.json(
+          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          {
+            status: 429,
+            headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) },
+          },
+        )
+      }
+      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+    }
+  }
+
+  if (fetched.length === 0) {
+    const msg =
+      'Tidak ada sumber yang dapat dikutip untuk sirah perang ini. Tambahkan domain whitelist atau ubah ejaan nama.'
+    await markFailed(jobId, 'no_sources', msg)
+    return Response.json(
+      { ok: false, error: { code: 'NO_SOURCES', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // 7. Build hinted source set — admin hint + optional type hint biases
+  //    the LLM without changing the schema contract.
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (payload.type) {
+    hintParts.push(`Jenis pertempuran yang diharapkan: ${payload.type}.`)
+  }
+  const hintedSources = hintParts.length > 0
+    ? [
+        ...fetched,
+        {
+          url: 'admin://hints',
+          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
+        },
+      ]
+    : fetched
+
+  // 8. LLM extract.
+  let extraction
+  try {
+    extraction = await extractBattleData(payload.name, hintedSources)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'CONFLICT'
+    ) {
+      log.error({ err: message }, 'agent role not configured')
+      await markFailed(jobId, 'provider_not_configured', message)
+      return Response.json(
+        {
+          ok: false,
+          error: {
+            code: 'PROVIDER_NOT_CONFIGURED',
+            message:
+              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
+          },
+        },
+        { status: 503 },
+      )
+    }
+    log.error({ err: message }, 'LLM extraction threw')
+    await markFailed(jobId, 'internal_error', message)
+    return Response.json(
+      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
+      { status: 500 },
+    )
+  }
+
+  const { battleData, citations: cites, modelUsed } = extraction
+
+  // 9. Validate the LLM actually identified the battle.
+  if (!battleData.nameAr && !battleData.nameId) {
+    const msg = 'Sumber yang diambil tidak cocok dengan perang — coba sempurnakan ejaan.'
+    await markFailed(jobId, 'extraction_empty', msg)
+    return Response.json(
+      { ok: false, error: { code: 'EXTRACTION_EMPTY', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // 10. Resolve location + commander against existing tables.
+  let locationId: string | null = null
+  let locationFallbackNote: string | null = null
+  if (battleData.locationSlug) {
+    locationId = await resolveLocationIdBySlug(battleData.locationSlug)
+    if (!locationId) {
+      // Surface the AI's guess so the reviewer can wire it up later.
+      locationFallbackNote = `[AI suggested location: ${battleData.locationSlug}]`
+    }
+  }
+
+  let commanderId: string | null = null
+  if (battleData.commanderName) {
+    commanderId = await resolveCommanderIdByName(battleData.commanderName)
+  }
+
+  // 11. Build the `event_date_notes` blob — prefer the LLM's note, fall back
+  //     to the location fallback note.
+  const combinedNotes =
+    [battleData.eventDateNotes, locationFallbackNote].filter(Boolean).join(' ').trim() ||
+    null
+
+  // 12. Insert draft row + citations (Neon HTTP — single round-trip best
+  //     effort; atomicity is not strict since Neon-http lacks transactions).
+  const slugBase = battleSlugify(battleData.nameId || payload.name)
+  const slug = `${slugBase}-${Date.now().toString(36)}`
+
+  const [row] = await db
+    .insert(battles)
+    .values({
+      slug,
+      nameAr: battleData.nameAr ?? payload.name,
+      nameId: battleData.nameId ?? payload.name,
+      type: battleData.type ?? payload.type ?? 'ghazwah',
+      eventDateAh: battleData.eventDateAh ?? null,
+      eventDateCe: battleData.eventDateCe ?? null,
+      eventDatePrecision: battleData.eventDatePrecision ?? null,
+      eventDateNotes: combinedNotes,
+      locationId,
+      commanderId,
+      opponentForce: battleData.opponentForce ?? null,
+      muslimCount: battleData.muslimCount ?? null,
+      opponentCount: battleData.opponentCount ?? null,
+      outcome: battleData.outcome ?? null,
+      casualtiesMuslim: battleData.casualtiesMuslim ?? null,
+      casualtiesOpponent: battleData.casualtiesOpponent ?? null,
+      strategyId: battleData.strategyId ?? null,
+      narrativeId: battleData.narrativeId ?? null,
+      significanceId: battleData.significanceId ?? null,
+      status: 'draft',
+      createdBy: job.createdBy ?? null,
+    })
+    .returning({ id: battles.id })
+
+  if (!row) {
+    const msg = 'failed to insert battle draft'
+    await markFailed(jobId, 'internal_error', msg)
+    return Response.json(
+      { ok: false, error: { code: 'INTERNAL_ERROR', message: msg } },
+      { status: 500 },
+    )
+  }
+
+  // 13. Insert citations.
+  const citationInserts = cites.map((c) => ({
+    contentType: 'battle',
+    contentId: row.id,
+    fieldPath: null,
+    sourceUrl: c.sourceUrl,
+    sourceDomain: hostOf(c.sourceUrl),
+    sourceExcerptAr: null,
+    sourceExcerptId: c.sourceExcerptId,
+    sourceLang: 'id' as const,
+    modelUsed,
+    extractedAt: new Date(),
+  }))
+  let insertedCitationCount = 0
+  if (citationInserts.length > 0) {
+    const inserted = await db
+      .insert(citations)
+      .values(citationInserts)
+      .returning({ id: citations.id })
+    insertedCitationCount = inserted.length
+  }
+
+  // 14. Mark the job complete. `resultFigureId` is the generic
+  //     "result content id" — see column comment in the figure flow.
+  await db
+    .update(researchJobs)
+    .set({
+      status: 'completed',
+      resultFigureId: row.id,
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(researchJobs.id, jobId))
+
+  return Response.json({
+    ok: true,
+    jobId,
+    battleId: row.id,
+    sourcesUsed: fetched.length,
+    citationsInserted: insertedCitationCount,
+    locationResolved: locationId !== null,
+    commanderResolved: commanderId !== null,
+  })
+}
+
+// ── battle_reingest ────────────────────────────────────────────────────
+//
+// Refresh an EXISTING battle row. Same merge semantics as figure_reingest:
+//   - 'enrich': only fill fields currently null/empty.
+//   - 'replace': overwrite the columns named in `focusFields`.
+
+const BATTLE_MERGEABLE_FIELDS = [
+  'nameAr',
+  'nameId',
+  'eventDateAh',
+  'eventDateCe',
+  'eventDatePrecision',
+  'eventDateNotes',
+  'opponentForce',
+  'muslimCount',
+  'opponentCount',
+  'outcome',
+  'casualtiesMuslim',
+  'casualtiesOpponent',
+  'strategyId',
+  'narrativeId',
+  'significanceId',
+] as const
+
+type BattleMergeableField = (typeof BATTLE_MERGEABLE_FIELDS)[number]
+
+async function handleBattleReIngest(jobId: string): Promise<Response> {
+  const log = logger.child({
+    route: '/api/jobs/research',
+    jobType: 'battle_reingest',
+    jobId,
+  })
+
+  // 1. Load the job row.
+  const job = await db.query.researchJobs.findFirst({
+    where: eq(researchJobs.id, jobId),
+  })
+  if (!job) {
+    log.warn({ jobId }, 'battle_reingest: job row not found')
+    return Response.json(
+      { ok: false, error: { code: 'NOT_FOUND', message: `research_jobs not found: ${jobId}` } },
+      { status: 404 },
+    )
+  }
+
+  if (job.status === 'completed') {
+    return Response.json({ ok: true, battleId: job.resultFigureId, alreadyCompleted: true })
+  }
+  if (job.status === 'failed') {
+    return Response.json({
+      ok: false,
+      error: {
+        code: job.errorCode ?? 'INTERNAL_ERROR',
+        message: job.errorMessage ?? 'previous run failed',
+      },
+    })
+  }
+
+  // 2. Mark running.
+  await db
+    .update(researchJobs)
+    .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+    .where(eq(researchJobs.id, jobId))
+
+  // 3. Coerce payload.
+  const payload = job.payload as {
+    battleId?: string
+    slug?: string
+    name?: string
+    type?: 'ghazwah' | 'sariyyah' | 'futuhat'
+    mode?: 'enrich' | 'replace'
+    focusFields?: BattleMergeableField[]
+    hints?: string
+    originalSnapshot?: Record<string, unknown>
+  } | null
+
+  if (!payload?.battleId || !payload?.name) {
+    const msg = 'payload missing battleId/name'
+    await markFailed(jobId, 'internal_error', msg)
+    log.error({ jobId, payload }, msg)
+    return Response.json(
+      { ok: false, error: { code: 'VALIDATION_ERROR', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // 4. Load the current battle.
+  const currentBattle = await db.query.battles.findFirst({
+    where: and(eq(battles.id, payload.battleId), isNull(battles.deletedAt)),
+  })
+  if (!currentBattle) {
+    const msg = `Battle not found or deleted: ${payload.battleId}`
+    await markFailed(jobId, 'not_found', msg)
+    log.warn({ jobId, battleId: payload.battleId }, 'battle_reingest: battle missing')
+    return Response.json(
+      { ok: false, error: { code: 'NOT_FOUND', message: msg } },
+      { status: 404 },
+    )
+  }
+
+  // 5. Run the AI extraction. Don't reuse the ingest helper — it INSERTs a
+  //    new row; we only UPDATE.
+  const domains = await loadActiveWhitelist()
+  let candidateUrls = await searchWhitelist(payload.name, domains)
+  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
+
+  const fetched: { url: string; content: string }[] = []
+  for (const url of candidateUrls) {
+    if (fetched.length >= MAX_SOURCES) break
+    try {
+      const res = await fetchPage(url)
+      fetched.push({ url: res.finalUrl, content: res.html })
+    } catch (err) {
+      if (err instanceof RateLimitExceededError) {
+        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
+        await markFailed(jobId, 'rate_limited', err.message)
+        return Response.json(
+          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          {
+            status: 429,
+            headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) },
+          },
+        )
+      }
+      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+    }
+  }
+
+  if (fetched.length === 0) {
+    const msg =
+      'Tidak ada sumber yang dapat dikutip untuk sirah perang ini. Tambahkan domain whitelist atau ubah ejaan nama.'
+    await markFailed(jobId, 'no_sources', msg)
+    return Response.json(
+      { ok: false, error: { code: 'NO_SOURCES', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  const focusList = payload.focusFields ?? []
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (focusList.length > 0) {
+    hintParts.push(`Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`)
+  }
+  const hintedSources = hintParts.length > 0
+    ? [
+        ...fetched,
+        {
+          url: 'admin://hints',
+          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
+        },
+      ]
+    : fetched
+
+  let extraction
+  try {
+    extraction = await extractBattleData(payload.name, hintedSources)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'CONFLICT'
+    ) {
+      log.error({ err: message }, 'agent role not configured')
+      await markFailed(jobId, 'provider_not_configured', message)
+      return Response.json(
+        {
+          ok: false,
+          error: {
+            code: 'PROVIDER_NOT_CONFIGURED',
+            message:
+              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
+          },
+        },
+        { status: 503 },
+      )
+    }
+    log.error({ err: message }, 'LLM extraction threw')
+    await markFailed(jobId, 'internal_error', message)
+    return Response.json(
+      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
+      { status: 500 },
+    )
+  }
+
+  const { battleData, citations: cites, modelUsed } = extraction
+
+  // 6. Per-mode merge patch.
+  const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
+  const replaceFields: Set<BattleMergeableField> = new Set(
+    mode === 'replace' ? (payload.focusFields ?? []) : [],
+  )
+
+  const fieldsChanged: BattleMergeableField[] = []
+  const patch: Partial<Record<BattleMergeableField, unknown>> = {}
+
+  for (const field of BATTLE_MERGEABLE_FIELDS) {
+    const aiValue = battleData[field as keyof typeof battleData] as unknown
+    if (isEmptyValue(aiValue)) continue
+    const currentValue = (currentBattle as unknown as Record<string, unknown>)[field]
+    if (mode === 'enrich') {
+      if (!isEmptyValue(currentValue)) continue
+    } else {
+      if (!replaceFields.has(field)) continue
+    }
+    patch[field] = aiValue
+    fieldsChanged.push(field)
+  }
+
+  // 7. Attempt to resolve location/commander if the current row is missing
+  //    them — both are conservative (only fill, never overwrite).
+  let locationFilled = false
+  if (!currentBattle.locationId && battleData.locationSlug) {
+    const locId = await resolveLocationIdBySlug(battleData.locationSlug)
+    if (locId) {
+      ;(patch as Record<string, unknown>)['locationId'] = locId
+      locationFilled = true
+    }
+  }
+  let commanderFilled = false
+  if (!currentBattle.commanderId && battleData.commanderName) {
+    const commanderId = await resolveCommanderIdByName(battleData.commanderName)
+    if (commanderId) {
+      ;(patch as Record<string, unknown>)['commanderId'] = commanderId
+      commanderFilled = true
+    }
+  }
+
+  // 8. UPDATE the battle row only if we have something to change.
+  if (Object.keys(patch).length > 0) {
+    await db
+      .update(battles)
+      .set({
+        ...(patch as Partial<typeof battles.$inferInsert>),
+        updatedAt: new Date(),
+        ...(job.createdBy ? { updatedBy: job.createdBy } : {}),
+      })
+      .where(eq(battles.id, currentBattle.id))
+  }
+
+  // 9. INSERT new citations. We never DELETE old citations.
+  const citationInserts = cites.map((c) => ({
+    contentType: 'battle',
+    contentId: currentBattle.id,
+    fieldPath: null,
+    sourceUrl: c.sourceUrl,
+    sourceDomain: hostOf(c.sourceUrl),
+    sourceExcerptAr: null,
+    sourceExcerptId: c.sourceExcerptId,
+    sourceLang: 'id' as const,
+    modelUsed,
+    extractedAt: new Date(),
+  }))
+  let insertedCitationCount = 0
+  if (citationInserts.length > 0) {
+    const inserted = await db
+      .insert(citations)
+      .values(citationInserts)
+      .returning({ id: citations.id })
+    insertedCitationCount = inserted.length
+  }
+
+  // 10. Mark the job complete.
+  const updatedPayload = {
+    ...(payload as Record<string, unknown>),
+    metadata: {
+      mode,
+      sourcesUsed: fetched.length,
+      fieldsChanged,
+      locationFilled,
+      commanderFilled,
+      citationsInserted: insertedCitationCount,
+      modelUsed,
+    },
+  }
+  await db
+    .update(researchJobs)
+    .set({
+      status: 'completed',
+      resultFigureId: currentBattle.id,
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+      payload: updatedPayload,
+    })
+    .where(eq(researchJobs.id, jobId))
+
+  return Response.json({
+    ok: true,
+    jobId,
+    battleId: currentBattle.id,
+    mode,
+    fieldsChanged,
+    sourcesUsed: fetched.length,
+    citationsInserted: insertedCitationCount,
+    locationFilled,
+    commanderFilled,
+  })
+}
+
+// ── insertNasabChain ───────────────────────────────────────────────────
+//
+// Walk a parent-up chain (`child → parent → grandparent → …`) and INSERT
+// the corresponding `figure_relations` rows. Missing ancestors are upserted
+// as minimal `shalih_pre_rasul` `figures` rows so the FK constraint holds.
+//
+// Convention (matches seeders/027_relations.ts):
+//   - For each (child, parent) pair, INSERT
+//     `(figureId=parent, relatedId=child, relationType='father')`.
+//
+// Idempotent — the unique partial index on `(figureId, relatedId,
+// relationType) WHERE deleted_at IS NULL` lets us rely on
+// `onConflictDoNothing`.
+
+interface NasabChainLink {
+  nameId: string
+  nameAr: string | null
+  kunyahId: string | null
+  kunyahAr: string | null
+  laqabId: string | null
+}
+
+async function insertNasabChain(args: {
+  seedFigureId: string
+  seedFigureName: string
+  chain: NasabChainLink[]
+  createdBy: string | null
+  log: typeof logger
+}): Promise<void> {
+  const { seedFigureId, chain, createdBy, log } = args
+
+  // Resolve the `shalih_pre_rasul` category id once — every synthesised
+  // ancestor figure goes into that bucket. If it's missing, we silently
+  // abort (the AI ingest pipeline is best-effort).
+  const cat = await db.query.figureCategories.findFirst({
+    where: and(
+      eq(figureCategories.slug, 'shalih_pre_rasul'),
+      isNull(figureCategories.deletedAt),
+    ),
+    columns: { id: true },
+  })
+  if (!cat) {
+    log.warn('nasab: shalih_pre_rasul category missing — skipping chain insert')
+    return
+  }
+  const ancestorCategoryId = cat.id
+
+  // Lookup helper: try to match an ancestor name against existing figures
+  // (case-insensitive ILIKE on both `nameFullId` and `nameFullAr`). When we
+  // find one, reuse the existing row instead of duplicating.
+  async function resolveOrInsertAncestor(link: NasabChainLink): Promise<string | null> {
+    const id = link.nameId.trim()
+    const ar = (link.nameAr ?? '').trim()
+    if (!id && !ar) return null
+
+    const matchClauses = [
+      id ? ilike(figures.nameFullId, id) : null,
+      ar ? ilike(figures.nameFullAr, ar) : null,
+    ].filter((c): c is NonNullable<typeof c> => c !== null)
+    const existing = await db.query.figures.findFirst({
+      where: and(or(...matchClauses)!, isNull(figures.deletedAt)),
+      columns: { id: true },
+    })
+    if (existing) return existing.id
+
+    const slug = `${slugify(id || ar)}-${Date.now().toString(36)}`
+    const [created] = await db
+      .insert(figures)
+      .values({
+        slug,
+        categoryId: ancestorCategoryId,
+        gender: 'male', // Nasab links go through the paternal line.
+        nameFullId: id || ar,
+        nameFullAr: ar || id,
+        kunyahId: link.kunyahId,
+        kunyahAr: link.kunyahAr,
+        laqabId: link.laqabId,
+        summaryId: 'Leluhur dari rantai nasab.',
+        status: 'draft',
+        createdBy,
+      })
+      .returning({ id: figures.id })
+    return created?.id ?? null
+  }
+
+  // Walk the chain, pairing each link with its child (previous link or the
+  // seed figure for the very first link).
+  let childId: string = seedFigureId
+  for (const link of chain) {
+    const parentId = await resolveOrInsertAncestor(link)
+    if (!parentId) break // unable to materialise — stop the chain here
+    if (parentId === childId) break // defensive — avoid self-loops
+
+    await db
+      .insert(figureRelations)
+      .values({
+        figureId: parentId,
+        relatedId: childId,
+        relationType: 'father',
+        notesId: link.nameId,
+      })
+      .onConflictDoNothing()
+
+    // Also insert the reverse direction so the existing detail panel (which
+    // reads relations where `figureId = this.id`) surfaces the parent under
+    // the "Orang tua" bucket.
+    await db
+      .insert(figureRelations)
+      .values({
+        figureId: childId,
+        relatedId: parentId,
+        relationType: 'son',
+        notesId: link.nameId,
+      })
+      .onConflictDoNothing()
+
+    childId = parentId
+  }
 }
 
 async function markFailed(jobId: string, code: string, message: string): Promise<void> {
