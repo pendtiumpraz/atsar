@@ -104,7 +104,7 @@ export function Wizard({ author, quota }: WizardProps) {
     setState((s) => ({ ...s, options: { ...s.options, ...patch } }))
   }
 
-  const [generatingTitle, setGeneratingTitle] = React.useState(false)
+  const [generatingTitle, setGeneratingTitle] = useState(false)
 
   async function generateTitle() {
     if (state.figures.length === 0) {

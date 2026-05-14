@@ -6,6 +6,11 @@ docs
 !README.md
 .github
 .vscode
-storage
-uploads
-generated
+# Leading slash anchors to repo root. Without it, `uploads` matches any
+# directory called "uploads" anywhere — including
+# apps/web/lib/server/uploads/storage.ts which is real source code
+# that the Vercel Blob fallback depends on.
+/storage
+/uploads
+/generated
+
