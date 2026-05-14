@@ -104,25 +104,44 @@ export function Wizard({ author, quota }: WizardProps) {
     setState((s) => ({ ...s, options: { ...s.options, ...patch } }))
   }
 
-  function generateTitle() {
-    // AI title generation is a stretch goal — the backend service is not
-    // contracted yet. For now we synthesise a sensible placeholder from the
-    // selected figures so the button still feels useful in dev.
-    const first = state.figures[0]
-    if (!first || state.figures.length === 0) {
+  const [generatingTitle, setGeneratingTitle] = React.useState(false)
+
+  async function generateTitle() {
+    if (state.figures.length === 0) {
       toast.error('Pilih minimal satu tokoh dulu.')
       return
     }
-    const firstName = (first.nameShortId ?? first.slug).split(' ')[0] ?? first.slug
-    const guessAr = state.figures.length === 1
-      ? first.nameShortAr ?? 'سيرة'
-      : 'سير الأعلام'
-    const guessId =
-      state.figures.length === 1
-        ? `Sirah ${firstName}`
-        : `Kumpulan Sirah — ${state.figures.length} Tokoh`
-    setState((s) => ({ ...s, titleAr: s.titleAr || guessAr, titleId: s.titleId || guessId }))
-    toast.success('Judul terbentuk dari tokoh terpilih.')
+    setGeneratingTitle(true)
+    try {
+      const res = await fetch('/api/v1/ai/generate-title', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          figureSlugs: state.figures.map((f) => f.slug),
+        }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { error?: { message?: string } }
+          | null
+        throw new Error(body?.error?.message ?? `Gagal generate judul (${res.status})`)
+      }
+      const body = (await res.json()) as {
+        ok: true
+        data: { titleId: string; titleAr: string; subtitleId?: string }
+      }
+      setState((s) => ({
+        ...s,
+        titleId: body.data.titleId,
+        titleAr: body.data.titleAr,
+      }))
+      toast.success('Judul dihasilkan oleh AI.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal generate judul.')
+    } finally {
+      setGeneratingTitle(false)
+    }
   }
 
   async function handleSubmit() {
@@ -295,9 +314,10 @@ export function Wizard({ author, quota }: WizardProps) {
                 variant="outline"
                 onClick={generateTitle}
                 size="sm"
+                disabled={generatingTitle || state.figures.length === 0}
               >
                 <Sparkles className="h-4 w-4" />
-                Generate dari AI
+                {generatingTitle ? 'Membuat judul…' : 'Generate dari AI'}
               </Button>
               <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">
                 Isi otomatis dari tokoh yang telah dipilih. Anda tetap bisa
