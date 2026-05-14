@@ -44,6 +44,7 @@ const MATRIX: Record<string, string[]> = {
     'quiz.attempt',
     'quiz.manage',
     'audit_log.view',
+    'security.manage',
   ],
   reviewer: [
     'figures.view',
@@ -55,13 +56,7 @@ const MATRIX: Record<string, string[]> = {
     'quiz.attempt',
     'audit_log.view',
   ],
-  subscriber: [
-    'figures.view',
-    'battles.view',
-    'ai.chat',
-    'pdf.export',
-    'quiz.attempt',
-  ],
+  subscriber: ['figures.view', 'battles.view', 'ai.chat', 'pdf.export', 'quiz.attempt'],
 }
 
 export async function seed003RolePermissions() {

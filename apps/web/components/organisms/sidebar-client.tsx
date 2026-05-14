@@ -164,7 +164,7 @@ const ADMIN_SECTIONS: AdminSection[] = [
     id: 'sistem',
     label: 'Sistem',
     icon: 'Cog',
-    slugs: ['admin-fonts', 'admin-audit'],
+    slugs: ['admin-fonts', 'admin-audit', 'admin-security'],
   },
 ]
 

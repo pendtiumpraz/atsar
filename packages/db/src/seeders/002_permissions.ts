@@ -54,6 +54,8 @@ const PERMS: Array<{ slug: string; group: string; nameId: string }> = [
   { slug: 'quiz.manage', group: 'quiz', nameId: 'Manage quiz' },
   // Audit
   { slug: 'audit_log.view', group: 'audit', nameId: 'Lihat audit log' },
+  // Security
+  { slug: 'security.manage', group: 'security', nameId: 'Manage security settings' },
 ]
 
 export async function seed002Permissions() {

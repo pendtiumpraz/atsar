@@ -39,6 +39,7 @@ import { seed027Relations } from './seeders/027_relations.js'
 import { seed028DevUsers } from './seeders/028_dev_users.js'
 import { seed029Nasab } from './seeders/029_nasab.js'
 import { seed030RelationPaths } from './seeders/030_relation_paths.js'
+import { seed031SecuritySettings } from './seeders/031_security_settings.js'
 
 async function main() {
   const isDev = process.argv.includes('--dev')
@@ -62,6 +63,7 @@ async function main() {
     await seed014PdfTemplates()
     await seed015LocationsCore()
     await seed016AdminUser()
+    await seed031SecuritySettings()
 
     if (isDev) {
       await seed017DemoFigures()
