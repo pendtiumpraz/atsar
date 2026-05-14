@@ -14,7 +14,7 @@
 //     need pagination meta, via the `withMeta` escape hatch below.)
 //   - Mutating endpoints return the created/updated resource.
 
-import { api, type ApiRequestInit } from './client'
+import { api, apiPaginated, type ApiRequestInit } from './client'
 
 // ─── Shared types (kept loose on purpose) ──────────────────────────────
 export type Paginated<T> = { rows: T[]; total: number; page: number; perPage: number }
@@ -49,7 +49,7 @@ export interface FigureListParams {
 
 export const figuresApi = {
   list: (params: FigureListParams = {}) =>
-    api.get<Paginated<any>>(`/figures${buildQuery(params)}`),
+    apiPaginated<any>(`/figures${buildQuery(params)}`),
   getBySlug: (slug: string) => api.get<any>(`/figures/${encodeURIComponent(slug)}`),
   create: (body: Record<string, unknown>, init?: ApiRequestInit) =>
     api.post<any>('/figures', body, init),
@@ -58,7 +58,7 @@ export const figuresApi = {
   remove: (slug: string) => api.delete<{ id: string }>(`/figures/${encodeURIComponent(slug)}`),
   trash: {
     list: (params: { page?: number; perPage?: number } = {}) =>
-      api.get<Paginated<any>>(`/trash/figures${buildQuery(params)}`),
+      apiPaginated<any>(`/trash/figures${buildQuery(params)}`),
     restore: (id: string) => api.post<{ id: string }>(`/trash/figures/${id}/restore`),
     hardDelete: (id: string) => api.delete<{ id: string }>(`/trash/figures/${id}/hard`),
   },
@@ -73,7 +73,7 @@ export interface BattleListParams {
 
 export const battlesApi = {
   list: (params: BattleListParams = {}) =>
-    api.get<Paginated<any>>(`/battles${buildQuery(params)}`),
+    apiPaginated<any>(`/battles${buildQuery(params)}`),
   getBySlug: (slug: string) => api.get<any>(`/battles/${encodeURIComponent(slug)}`),
   create: (body: Record<string, unknown>) => api.post<any>('/battles', body),
   update: (slug: string, body: Record<string, unknown>) =>
@@ -92,7 +92,7 @@ export const battlesApi = {
   },
   trash: {
     list: (params: { page?: number; perPage?: number } = {}) =>
-      api.get<Paginated<any>>(`/trash/battles${buildQuery(params)}`),
+      apiPaginated<any>(`/trash/battles${buildQuery(params)}`),
     restore: (id: string) => api.post<{ id: string }>(`/trash/battles/${id}/restore`),
     hardDelete: (id: string) => api.delete<{ id: string }>(`/trash/battles/${id}/hard`),
   },
@@ -107,7 +107,7 @@ export interface QuizListParams {
 
 export const quizzesApi = {
   list: (params: QuizListParams = {}) =>
-    api.get<Paginated<any>>(`/quizzes${buildQuery(params)}`),
+    apiPaginated<any>(`/quizzes${buildQuery(params)}`),
   getBySlug: (slug: string) => api.get<any>(`/quizzes/${encodeURIComponent(slug)}`),
   start: (slug: string) =>
     api.post<{ attemptId: string }>(`/quizzes/${encodeURIComponent(slug)}/start`, {}),
@@ -117,7 +117,7 @@ export const quizzesApi = {
     api.post<any>(`/quizzes/attempts/${attemptId}/complete`, {}),
   admin: {
     list: (params: QuizListParams = {}) =>
-      api.get<Paginated<any>>(`/admin/quizzes${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/quizzes${buildQuery(params)}`),
     create: (body: Record<string, unknown>) => api.post<any>('/admin/quizzes', body),
     update: (id: string, body: Record<string, unknown>) =>
       api.patch<any>(`/admin/quizzes/${id}`, body),
@@ -157,7 +157,7 @@ export const aiApi = {
       ...init,
     }),
   usage: (params: AiUsageParams = {}) =>
-    api.get<Paginated<any>>(`/ai/usage${buildQuery(params)}`),
+    apiPaginated<any>(`/ai/usage${buildQuery(params)}`),
 }
 
 // ─── PDF jobs ──────────────────────────────────────────────────────────
@@ -185,14 +185,14 @@ export const pdfApi = {
       perPage?: number
       status?: 'queued' | 'processing' | 'done' | 'failed'
     } = {},
-  ) => api.get<Paginated<any>>(`/pdf/jobs${buildQuery(params)}`),
+  ) => apiPaginated<any>(`/pdf/jobs${buildQuery(params)}`),
   get: (id: string) => api.get<any>(`/pdf/jobs/${id}`),
 }
 
 // ─── Notifications ─────────────────────────────────────────────────────
 export const notificationsApi = {
   list: (params: { page?: number; perPage?: number; unreadOnly?: boolean } = {}) =>
-    api.get<Paginated<any>>(`/notifications${buildQuery(params)}`),
+    apiPaginated<any>(`/notifications${buildQuery(params)}`),
   markRead: (id: string) => api.post<{ id: string }>(`/notifications/${id}/read`, {}),
   markAllRead: () => api.post<{ count: number }>('/notifications/read-all', {}),
 }
@@ -200,7 +200,7 @@ export const notificationsApi = {
 // ─── Citations ─────────────────────────────────────────────────────────
 export const citationsApi = {
   list: (params: { page?: number; perPage?: number; figureId?: string } = {}) =>
-    api.get<Paginated<any>>(`/citations${buildQuery(params)}`),
+    apiPaginated<any>(`/citations${buildQuery(params)}`),
   admin: {
     update: (id: string, body: Record<string, unknown>) =>
       api.patch<any>(`/admin/citations/${id}`, body),
@@ -211,10 +211,10 @@ export const citationsApi = {
 // ─── Locations ─────────────────────────────────────────────────────────
 export const locationsApi = {
   list: (params: { q?: string; page?: number; perPage?: number } = {}) =>
-    api.get<Paginated<any>>(`/locations${buildQuery(params)}`),
+    apiPaginated<any>(`/locations${buildQuery(params)}`),
   admin: {
     list: (params: { q?: string; page?: number; perPage?: number } = {}) =>
-      api.get<Paginated<any>>(`/admin/locations${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/locations${buildQuery(params)}`),
     create: (body: Record<string, unknown>) => api.post<any>('/admin/locations', body),
     update: (id: string, body: Record<string, unknown>) =>
       api.patch<any>(`/admin/locations/${id}`, body),
@@ -227,7 +227,7 @@ export const subscriptionsApi = {
   me: () => api.get<any>('/subscriptions/me'),
   admin: {
     list: (params: { page?: number; perPage?: number; tier?: string } = {}) =>
-      api.get<Paginated<any>>(`/admin/subscriptions${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/subscriptions${buildQuery(params)}`),
     activate: (id: string, body: Record<string, unknown> = {}) =>
       api.post<any>(`/admin/subscriptions/${id}/activate`, body),
   },
@@ -237,7 +237,7 @@ export const subscriptionsApi = {
 export const paymentsApi = {
   admin: {
     list: (params: { page?: number; perPage?: number; status?: string } = {}) =>
-      api.get<Paginated<any>>(`/admin/payments${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/payments${buildQuery(params)}`),
     confirm: (id: string) => api.post<any>(`/admin/payments/${id}/confirm`, {}),
     reject: (id: string, reason?: string) =>
       api.post<any>(`/admin/payments/${id}/reject`, { reason }),
@@ -247,7 +247,7 @@ export const paymentsApi = {
 // ─── Reviewer queue / assignments ──────────────────────────────────────
 export const reviewerApi = {
   queue: (params: { page?: number; perPage?: number; status?: string } = {}) =>
-    api.get<Paginated<any>>(`/reviewer/queue${buildQuery(params)}`),
+    apiPaginated<any>(`/reviewer/queue${buildQuery(params)}`),
   get: (id: string) => api.get<any>(`/reviewer/assignments/${id}`),
   approve: (id: string, body: Record<string, unknown> = {}) =>
     api.post<any>(`/reviewer/assignments/${id}/approve`, body),
@@ -261,7 +261,7 @@ export const reviewerApi = {
 export const adminApi = {
   users: {
     list: (params: { q?: string; page?: number; perPage?: number; role?: string } = {}) =>
-      api.get<Paginated<any>>(`/admin/users${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/users${buildQuery(params)}`),
     get: (id: string) => api.get<any>(`/admin/users/${id}`),
     update: (id: string, body: Record<string, unknown>) =>
       api.patch<any>(`/admin/users/${id}`, body),
@@ -287,7 +287,7 @@ export const adminApi = {
   },
   auditLogs: {
     list: (params: { page?: number; perPage?: number; actorId?: string; action?: string } = {}) =>
-      api.get<Paginated<any>>(`/admin/audit-logs${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/audit-logs${buildQuery(params)}`),
     get: (id: string) => api.get<any>(`/admin/audit-logs/${id}`),
   },
   fonts: {
@@ -310,7 +310,7 @@ export const adminApi = {
   },
   whitelist: {
     list: (params: { page?: number; perPage?: number; q?: string } = {}) =>
-      api.get<Paginated<any>>(`/admin/whitelist${buildQuery(params)}`),
+      apiPaginated<any>(`/admin/whitelist${buildQuery(params)}`),
     create: (body: Record<string, unknown>) => api.post<any>('/admin/whitelist', body),
     update: (id: string, body: Record<string, unknown>) =>
       api.patch<any>(`/admin/whitelist/${id}`, body),

@@ -351,7 +351,7 @@ interface EditProps {
 }
 
 function EditProviderDialog({ provider, onClose, onSaved }: EditProps) {
-  const [form, setForm] = React.useState({ name: '', baseUrl: '', notes: '' })
+  const [form, setForm] = React.useState({ name: '', baseUrl: '', notes: '', apiKey: '' })
   const [submitting, setSubmitting] = React.useState(false)
 
   React.useEffect(() => {
@@ -360,6 +360,7 @@ function EditProviderDialog({ provider, onClose, onSaved }: EditProps) {
         name: provider.name,
         baseUrl: provider.baseUrl ?? '',
         notes: provider.notes ?? '',
+        apiKey: '',
       })
     }
   }, [provider])
@@ -369,6 +370,7 @@ function EditProviderDialog({ provider, onClose, onSaved }: EditProps) {
     if (!provider) return
     setSubmitting(true)
     try {
+      // PATCH metadata first.
       const res = await fetch(`/api/v1/admin/ai-providers/${provider.id}`, {
         method: 'PATCH',
         credentials: 'include',
@@ -380,12 +382,33 @@ function EditProviderDialog({ provider, onClose, onSaved }: EditProps) {
         }),
       })
       if (!res.ok) throw new Error('Gagal menyimpan perubahan')
+
+      // If the admin pasted a new API key in this dialog, rotate it via the
+      // dedicated endpoint (separate POST so the encryption + audit-log
+      // path stays unified with the standalone Rotate button).
+      let nextLast4 = provider.apiKeyLast4
+      const newKey = form.apiKey.trim()
+      if (newKey.length > 0) {
+        const rot = await fetch(
+          `/api/v1/admin/ai-providers/${provider.id}/rotate`,
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey: newKey }),
+          },
+        )
+        if (!rot.ok) throw new Error('Gagal menyimpan API key baru')
+        nextLast4 = newKey.slice(-4)
+      }
+
       toast.success(`${form.name} berhasil diperbarui`)
       onSaved({
         ...provider,
         name: form.name.trim(),
         baseUrl: form.baseUrl.trim() || null,
         notes: form.notes.trim() || null,
+        apiKeyLast4: nextLast4,
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Gagal menyimpan perubahan')
@@ -432,6 +455,25 @@ function EditProviderDialog({ provider, onClose, onSaved }: EditProps) {
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               disabled={submitting}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-api-key">
+              API Key {provider?.apiKeyLast4 ? '(opsional — kosongkan untuk tetap pakai yang lama)' : '(wajib jika belum diset)'}
+            </Label>
+            <Input
+              id="edit-api-key"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={form.apiKey}
+              onChange={(e) => setForm((f) => ({ ...f, apiKey: e.target.value }))}
+              placeholder={provider?.apiKeyLast4 ? `sk-•••••${provider.apiKeyLast4}` : 'sk-...'}
+              disabled={submitting}
+              className="font-mono"
+            />
+            <p className="text-xs text-[rgb(var(--text-muted))]">
+              Key disimpan terenkripsi (AES-256-GCM). Hanya 4 karakter terakhir yang ditampilkan setelah disimpan.
+            </p>
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
