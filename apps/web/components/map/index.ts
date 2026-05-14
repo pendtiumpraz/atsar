@@ -6,7 +6,7 @@
 // Callers that need the WebGL canvas should `next/dynamic`-import it directly
 // from `@/components/map/map-view` with `{ ssr: false }`.
 
-export { LayerControls, parseLayerState } from './layer-controls'
+export { LayerControls, parseLayerState, isFilterActive } from './layer-controls'
 export type { LayerState, CategoryLayerKey, LayerControlsProps } from './layer-controls'
 
 export { LocationSidePanel } from './location-side-panel'

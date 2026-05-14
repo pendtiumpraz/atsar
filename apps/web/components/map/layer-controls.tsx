@@ -1,36 +1,57 @@
 // `<LayerControls />` — the toolbar above the map (WIREFRAMES §10).
 //
-// Surfaces three knobs:
-//   1. Per-category toggles (Nabi / Sahabat / Tabi'in / Tabi'ut / Shalih).
+// Surfaces:
+//   1. Per-category toggles for all 6 canonical figure-category slugs
+//      (Nabi / Pra-Rasul / Sahabat / Tabi'in / Tabi'ut Tabi'in / Pasca-Salaf).
 //      Multi-select stored as a comma-separated `?layers=` param so URL stays
-//      shareable.  `tokoh` is the umbrella value when no category is set.
+//      shareable.  Empty `?layers=` means "show everything".
 //   2. Gender filter (Semua / Laki-laki / Perempuan) — `?gender=`.
-//   3. Hijrah-route overlay — `?hijrah=1`.
+//   3. Tokoh / Lokasi overlay toggles — `?tokoh=0`, `?lokasi=0`.
+//   4. Hijrah-route overlay — `?hijrah=1`.
 //
 // All state lives in the URL via `useSearchParams` + `router.replace`. That
-// way the parent page (`map/page.tsx`) can re-read the params server-side to
-// pre-filter the GeoJSON if it wants to, and deep links to a specific layer
-// combo keep working.  No internal state needed.
+// way the parent page (`map/page.tsx`) re-reads the params and filters the
+// GeoJSON (markers AND side-panel figure list) accordingly, and deep links to
+// a specific layer combo keep working.
 
 'use client'
 
-import { Route, Users } from 'lucide-react'
+import {
+  BookOpen,
+  Crown,
+  GraduationCap,
+  Library,
+  MapPin,
+  Route,
+  Star,
+  Users,
+} from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useCallback, useMemo } from 'react'
+import { type ComponentType, useCallback, useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-/** Recognised category layer keys.  Mirrors the seed slugs in `figure-categories`. */
+/**
+ * Recognised category layer keys.  Mirrors the seed slugs in
+ * `packages/db/src/seeders/007_figure_categories.ts`.
+ */
 export const CATEGORY_LAYERS = [
-  { key: 'nabi', label: 'Nabi' },
-  { key: 'sahabat', label: 'Sahabat' },
-  { key: 'tabiin', label: "Tabi'in" },
-  { key: 'tabiut_tabiin', label: "Tabi'ut Tabi'in" },
-  { key: 'shalih_pasca_rasul', label: 'Shalih' },
-] as const
+  { key: 'nabi', label: 'Nabi', icon: Crown },
+  { key: 'shalih_pre_rasul', label: 'Pra-Rasul ﷺ', icon: Star },
+  { key: 'sahabat', label: 'Sahabat', icon: Users },
+  { key: 'tabiin', label: "Tabi'in", icon: BookOpen },
+  { key: 'tabiut_tabiin', label: "Tabi'ut Tabi'in", icon: GraduationCap },
+  { key: 'shalih_pasca_rasul', label: 'Pasca-Salaf', icon: Library },
+] as const satisfies ReadonlyArray<{
+  key: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+}>
 
 export type CategoryLayerKey = (typeof CATEGORY_LAYERS)[number]['key']
+
+const CATEGORY_KEYS: ReadonlySet<string> = new Set(CATEGORY_LAYERS.map((c) => c.key))
 
 const GENDER_OPTIONS = [
   { value: '', label: 'Semua' },
@@ -40,11 +61,14 @@ const GENDER_OPTIONS = [
 
 /** Parsed view of the URL-driven layer state, exposed so consumers can react. */
 export interface LayerState {
+  /** Selected category slugs.  Empty set = "all categories visible". */
   categories: ReadonlySet<CategoryLayerKey>
   gender: '' | 'male' | 'female'
   hijrah: boolean
-  /** Show the tokoh (figure) overlay.  Default: true.  `?tokoh=0` hides it. */
+  /** Show the tokoh (figure) overlay.  Default true.  `?tokoh=0` hides it. */
   showFigures: boolean
+  /** Show the lokasi (city) overlay.  Default true.  `?lokasi=0` hides it. */
+  showLocations: boolean
 }
 
 /**
@@ -56,16 +80,32 @@ export function parseLayerState(params: URLSearchParams): LayerState {
   const raw = params.get('layers') ?? ''
   const categories = new Set<CategoryLayerKey>()
   for (const part of raw.split(',')) {
-    const trimmed = part.trim() as CategoryLayerKey
-    if (CATEGORY_LAYERS.some((c) => c.key === trimmed)) categories.add(trimmed)
+    const trimmed = part.trim()
+    if (CATEGORY_KEYS.has(trimmed)) categories.add(trimmed as CategoryLayerKey)
   }
   const genderRaw = params.get('gender')
   const gender =
     genderRaw === 'male' || genderRaw === 'female' ? genderRaw : ''
   const hijrah = params.get('hijrah') === '1'
-  // Default ON — only `?tokoh=0` hides the overlay so deep links stay stable.
+  // Default ON — only `?tokoh=0` / `?lokasi=0` hides the overlay so deep links
+  // stay stable.
   const showFigures = params.get('tokoh') !== '0'
-  return { categories, gender, hijrah, showFigures }
+  const showLocations = params.get('lokasi') !== '0'
+  return { categories, gender, hijrah, showFigures, showLocations }
+}
+
+/**
+ * Returns true when any URL filter is non-default — used by callers (e.g. the
+ * side panel header) to surface a "Filter aktif" badge with a clear button.
+ */
+export function isFilterActive(state: LayerState): boolean {
+  return (
+    state.categories.size > 0 ||
+    state.gender !== '' ||
+    state.hijrah ||
+    !state.showFigures ||
+    !state.showLocations
+  )
 }
 
 export interface LayerControlsProps {
@@ -82,8 +122,8 @@ export function LayerControls({ className }: LayerControlsProps) {
     [searchParams],
   )
 
-  // Single URL writer — we wipe `?page=` whenever filters change but otherwise
-  // preserve the rest so deep-linked positions (zoom/center) survive.
+  // Single URL writer — preserve the rest of the params so deep-linked
+  // positions (zoom/center) survive.
   const pushParams = useCallback(
     (mutate: (next: URLSearchParams) => void) => {
       const next = new URLSearchParams(searchParams.toString())
@@ -135,7 +175,14 @@ export function LayerControls({ className }: LayerControlsProps) {
     })
   }, [pushParams, state.showFigures])
 
-  const tokohActive = state.categories.size === 0
+  const toggleLocations = useCallback(() => {
+    pushParams((p) => {
+      if (state.showLocations) p.set('lokasi', '0')
+      else p.delete('lokasi')
+    })
+  }, [pushParams, state.showLocations])
+
+  const allCategoriesActive = state.categories.size === 0
 
   return (
     <div
@@ -146,8 +193,7 @@ export function LayerControls({ className }: LayerControlsProps) {
       role="toolbar"
       aria-label="Kontrol lapisan peta"
     >
-      {/* "Tokoh" pseudo-toggle — disabled when categories are empty since it's
-          already the implicit state.  Clicking it clears any active filters. */}
+      {/* "Semua" pseudo-toggle — clicking it clears any active category filters. */}
       <button
         type="button"
         onClick={() =>
@@ -155,16 +201,16 @@ export function LayerControls({ className }: LayerControlsProps) {
             p.delete('layers')
           })
         }
-        aria-pressed={tokohActive}
+        aria-pressed={allCategoriesActive}
         className={cn(
           'h-8 rounded-md border px-3 text-xs font-medium transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))]',
-          tokohActive
+          allCategoriesActive
             ? 'border-[rgb(var(--primary))] bg-[rgb(var(--primary))] text-[rgb(var(--primary-foreground))]'
             : 'border-[rgb(var(--border))] bg-transparent text-[rgb(var(--text))] hover:bg-[rgb(var(--bg-elevated))]',
         )}
       >
-        Tokoh (semua)
+        Semua
       </button>
 
       <div
@@ -174,6 +220,7 @@ export function LayerControls({ className }: LayerControlsProps) {
       >
         {CATEGORY_LAYERS.map((c) => {
           const active = state.categories.has(c.key)
+          const Icon = c.icon
           return (
             <button
               key={c.key}
@@ -181,14 +228,15 @@ export function LayerControls({ className }: LayerControlsProps) {
               onClick={() => toggleCategory(c.key)}
               aria-pressed={active}
               className={cn(
-                'h-8 rounded-md border px-2.5 text-xs font-medium transition-colors',
+                'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))]',
                 active
-                  ? 'border-[rgb(var(--accent))] bg-[rgb(var(--bg-elevated))] text-[rgb(var(--text))]'
+                  ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent))]/10 text-[rgb(var(--accent))]'
                   : 'border-[rgb(var(--border))] bg-transparent text-[rgb(var(--text-muted))] hover:bg-[rgb(var(--bg-elevated))] hover:text-[rgb(var(--text))]',
               )}
             >
-              {c.label}
+              <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>{c.label}</span>
             </button>
           )
         })}
@@ -218,18 +266,29 @@ export function LayerControls({ className }: LayerControlsProps) {
       <div className="ml-auto flex items-center gap-2">
         <Button
           type="button"
+          variant={state.showLocations ? 'primary' : 'outline'}
+          size="sm"
+          onClick={toggleLocations}
+          aria-pressed={state.showLocations}
+          aria-label={
+            state.showLocations ? 'Sembunyikan lokasi' : 'Tampilkan lokasi'
+          }
+        >
+          <MapPin className="h-3.5 w-3.5" aria-hidden />
+          <span>Lokasi</span>
+        </Button>
+        <Button
+          type="button"
           variant={state.showFigures ? 'primary' : 'outline'}
           size="sm"
           onClick={toggleFigures}
           aria-pressed={state.showFigures}
           aria-label={
-            state.showFigures
-              ? 'Sembunyikan tokoh di peta'
-              : 'Tampilkan tokoh di peta'
+            state.showFigures ? 'Sembunyikan tokoh di peta' : 'Tampilkan tokoh di peta'
           }
         >
           <Users className="h-3.5 w-3.5" aria-hidden />
-          <span>Tampilkan Tokoh</span>
+          <span>Tokoh</span>
         </Button>
         <Button
           type="button"

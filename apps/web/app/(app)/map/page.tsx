@@ -14,10 +14,14 @@
 //   into `<MapView />` alongside the URL-driven layer / selection state.
 //
 // Data flow:
-//   /api/v1/locations → PublicLocation[] → MarkerCollection (GeoJSON FC)
-//   ─→ <MapView /> (cluster + click)  ──→ onMarkerClick(id)
-//                                          └─ stored in local React state,
-//                                             surfaced to `<LocationSidePanel />`.
+//   /api/v1/locations              → PublicLocation[]    → MarkerCollection
+//   /api/v1/figures/map-points     → FigureMapPointRow[] → FigureMarkerCollection
+//   URL params (?layers, ?gender, ?tokoh, ?lokasi, ?hijrah)
+//   ──────────────────────────────────────────────────────────────────────────
+//   Filtered FigureMarkerCollection ──┬──► <MapView />  (cluster + click)
+//                                     └──► <LocationSidePanel /> figures prop
+//   So toggling a category chip outside the map dims both the markers AND the
+//   side-panel tabs in lock-step.
 //
 // Selection state intentionally lives in component state — not the URL —
 // because the map's zoom/center are not yet preserved either.  Once we add
@@ -27,12 +31,13 @@
 
 import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   LayerControls,
   LocationSidePanel,
+  isFilterActive,
   parseLayerState,
   type FigureMarkerCollection,
   type LocationSummary,
@@ -101,6 +106,8 @@ function figureRowsToCollection(rows: FigureMapPointRow[]): FigureMarkerCollecti
           nameFullAr: r.nameFullAr,
           nameShortId: r.nameShortId,
           role: r.role,
+          categorySlug: r.categorySlug,
+          gender: r.gender,
           locationId: r.locationId,
           locationName: r.locationName,
         },
@@ -148,8 +155,22 @@ function MapShellPlaceholder() {
   )
 }
 
+/** Empty figure collection — stable identity so MapView doesn't tear-down. */
+const EMPTY_FIGURE_COLLECTION: FigureMarkerCollection = {
+  type: 'FeatureCollection',
+  features: [],
+}
+
+/** Empty location collection — same idea. */
+const EMPTY_LOCATION_COLLECTION: MarkerCollection = {
+  type: 'FeatureCollection',
+  features: [],
+}
+
 export default function MapPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const layerState = useMemo(
     () => parseLayerState(new URLSearchParams(searchParams.toString())),
     [searchParams],
@@ -199,15 +220,49 @@ export default function MapPage() {
     staleTime: 5 * 60_000,
   })
 
+  // Apply URL filters to the raw figure-point rows once.  The same filtered
+  // array drives BOTH the GeoJSON source on the map AND the side-panel
+  // "Tokoh terkait" list, so toggling chips outside the map dims markers and
+  // hides tabs in lock-step.
+  const filteredFigurePoints = useMemo(() => {
+    const rows = figurePoints ?? []
+    if (rows.length === 0) return rows
+    const cats = layerState.categories
+    const gender = layerState.gender
+    if (cats.size === 0 && !gender) return rows
+    // `cats` is typed as `ReadonlySet<CategoryLayerKey>` — widen to a plain
+    // `ReadonlySet<string>` for the membership check so the row's untyped
+    // `categorySlug` value is comparable without an unsafe cast.
+    const catsAsStrings = cats as ReadonlySet<string>
+    return rows.filter((r) => {
+      if (cats.size > 0) {
+        const slug = r.categorySlug ?? ''
+        if (!catsAsStrings.has(slug)) return false
+      }
+      if (gender && r.gender !== gender) return false
+      return true
+    })
+  }, [figurePoints, layerState.categories, layerState.gender])
+
   const collection = useMemo<MarkerCollection>(
     () => rowsToCollection(data ?? []),
     [data],
   )
 
   const figureCollection = useMemo(
-    () => figureRowsToCollection(figurePoints ?? []),
-    [figurePoints],
+    () => figureRowsToCollection(filteredFigurePoints),
+    [filteredFigurePoints],
   )
+
+  // Location overlay can also be hidden — feed an empty collection instead of
+  // a `null` so the MapView never has to deal with missing sources.
+  const locationCollectionForMap = layerState.showLocations
+    ? collection
+    : EMPTY_LOCATION_COLLECTION
+
+  const figureCollectionForMap = layerState.showFigures
+    ? figureCollection
+    : EMPTY_FIGURE_COLLECTION
 
   function handleMarkerClick(id: string) {
     const row = (data ?? []).find((r) => r.id === id)
@@ -231,7 +286,7 @@ export default function MapPage() {
   // the figure name in the side panel for that — keeps the map navigable).
   const handleFigureClick = useCallback(
     (figureId: string) => {
-      const fig = (figurePoints ?? []).find((p) => p.figureId === figureId)
+      const fig = filteredFigurePoints.find((p) => p.figureId === figureId)
       if (!fig) return
       const loc = (data ?? []).find((r) => r.id === fig.locationId)
       if (loc) {
@@ -256,18 +311,44 @@ export default function MapPage() {
         countryCode: null,
       })
     },
-    [figurePoints, data],
+    [filteredFigurePoints, data],
   )
 
   // Figures filtered down to whichever location is currently selected — fed
   // into the side panel so it can render the "Tokoh terkait" list without a
-  // second HTTP round-trip.  Memoised against the raw point array so the
-  // panel doesn't churn on unrelated state changes.
+  // second HTTP round-trip.  We use the URL-filtered array so the side panel
+  // honours the same chips the user toggled on the toolbar.
   const figuresAtSelected = useMemo(() => {
     if (!selected) return []
-    return (figurePoints ?? []).filter((p) => p.locationId === selected.id)
-  }, [figurePoints, selected])
+    return filteredFigurePoints.filter((p) => p.locationId === selected.id)
+  }, [filteredFigurePoints, selected])
 
+  // "Filter aktif" badge — counts the number of non-default URL filters so
+  // the side panel can render a single pill summary.
+  const activeFilterCount = useMemo(() => {
+    let n = 0
+    if (layerState.categories.size > 0) n += layerState.categories.size
+    if (layerState.gender) n += 1
+    if (layerState.hijrah) n += 1
+    if (!layerState.showFigures) n += 1
+    if (!layerState.showLocations) n += 1
+    return n
+  }, [layerState])
+
+  const onClearFilters = useCallback(() => {
+    // Wipe every URL param this page interprets, keep anything else (e.g.
+    // utm_*, ref) so the user's analytics still work.
+    const next = new URLSearchParams(searchParams.toString())
+    for (const key of ['layers', 'gender', 'hijrah', 'tokoh', 'lokasi']) {
+      next.delete(key)
+    }
+    const qs = next.toString()
+    router.replace(qs.length > 0 ? `${pathname}?${qs}` : pathname, {
+      scroll: false,
+    })
+  }, [pathname, router, searchParams])
+
+  const filterIsActive = isFilterActive(layerState)
 
   return (
     <div className="flex flex-col gap-3">
@@ -283,7 +364,7 @@ export default function MapPage() {
             ? 'Memuat lokasi…'
             : isError
               ? 'Gagal memuat lokasi.'
-              : `${collection.features.length} lokasi · ${figureCollection.features.length} tokoh`}
+              : `${locationCollectionForMap.features.length} lokasi · ${figureCollectionForMap.features.length} tokoh`}
         </p>
       </div>
 
@@ -298,8 +379,8 @@ export default function MapPage() {
       >
         <div className="relative h-full min-h-[20rem] overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))]">
           <MapView
-            markers={collection}
-            figureMarkers={figureCollection}
+            markers={locationCollectionForMap}
+            figureMarkers={figureCollectionForMap}
             showFigures={layerState.showFigures}
             selectedId={selected?.id}
             onMarkerClick={handleMarkerClick}
@@ -326,6 +407,8 @@ export default function MapPage() {
                   location={selected}
                   figures={figuresAtSelected}
                   onClose={() => setSelected(null)}
+                  activeFilterCount={activeFilterCount}
+                  onClearFilters={filterIsActive ? onClearFilters : undefined}
                   compact
                 />
               </div>
@@ -336,6 +419,8 @@ export default function MapPage() {
             location={selected}
             figures={figuresAtSelected}
             onClose={() => setSelected(null)}
+            activeFilterCount={activeFilterCount}
+            onClearFilters={filterIsActive ? onClearFilters : undefined}
           />
         )}
       </div>
