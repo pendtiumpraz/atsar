@@ -490,7 +490,7 @@
 - [x] `GET/POST/PUT/PATCH/DELETE /api/v1/admin/ai-providers` (+ `/[id]/models`, `/[id]/rotate`, `/[id]/test`, `/ai-models`, `/ai-role-assignments`).
 - [x] API key encryption at rest via `AI_MASTER_KEY` (AES-256-GCM) in `@athar/ai/crypto`; write-only field; never returned decrypted; only `apiKeyLast4` in responses.
 - [x] Permission slugs `ai_providers.manage` + `ai_models.manage` already seeded (002_permissions.ts) and granted to admin in 003_role_permissions.ts.
-- Status: completed.
+- Status: completed in commit `abfee68`.
 
 ### 7.5.6 Ghazwah Coordinates Backfill (commit `ed7e61c`)
 - [x] 2/15 battles missing `locationId` — Ghazwah Bani Mushtaliq + Ghazwah Hunain. Added `muraysi` location (23.50N, 38.95E), `hunayn` already existed. Verified 0/15 missing after backfill.
