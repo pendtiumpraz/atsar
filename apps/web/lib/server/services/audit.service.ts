@@ -18,6 +18,8 @@ export type AuditAction =
   | 'hard_delete'
   | 'login'
   | 'logout'
+  | 'login_failure'
+  | 'lockout'
   | 'role_change'
   | 'permission_change'
   | 'config_change'

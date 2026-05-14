@@ -33,31 +33,36 @@ function buildGoogleFontsUrl(
   return `https://fonts.googleapis.com/css2?${params.join('&')}&display=swap`
 }
 
+/**
+ * Sanitize a font family name before splicing it into a CSS `:root { ... }`
+ * block delivered via `dangerouslySetInnerHTML`. An admin who can write to
+ * the fonts table could otherwise inject `';}body{display:none}` or worse.
+ *
+ * Strips any character that isn't safe inside a single-quoted CSS string:
+ * single quotes, backslash, `</style>` close, newline, `{`, `}`, `;`.
+ * What's left is whitespace + letters + digits + hyphens + a few common
+ * accent characters — which is more than enough for real font families.
+ */
+function safeFontFamily(name: string): string {
+  return name.replace(/['"\\<>{};\r\n\t]/g, '').trim().slice(0, 64)
+}
+
 // Build a single `:root { ... }` rule with only the assigned slots.  Each
 // var falls back to a sensible system stack so unassigned slots still work.
 function buildCssVars(fonts: Awaited<ReturnType<typeof getActiveThemeFonts>>): string {
   const lines: string[] = []
-  if (fonts.display_latin) {
-    lines.push(`--font-display-latin: '${fonts.display_latin}', ui-serif, Georgia, serif;`)
+  const push = (cssVar: string, name: string, fallback: string) => {
+    const safe = safeFontFamily(name)
+    if (safe.length === 0) return
+    lines.push(`${cssVar}: '${safe}', ${fallback};`)
   }
-  if (fonts.body_latin) {
-    lines.push(`--font-body-latin: '${fonts.body_latin}', ui-sans-serif, system-ui, sans-serif;`)
-  }
-  if (fonts.display_arab) {
-    lines.push(`--font-display-arab: '${fonts.display_arab}', 'Amiri', serif;`)
-  }
-  if (fonts.section_arab) {
-    lines.push(`--font-section-arab: '${fonts.section_arab}', 'Cairo', sans-serif;`)
-  }
-  if (fonts.body_arab) {
-    lines.push(`--font-body-arab: '${fonts.body_arab}', 'Cairo', sans-serif;`)
-  }
-  if (fonts.quran_arab) {
-    lines.push(`--font-quran-arab: '${fonts.quran_arab}', 'Amiri', serif;`)
-  }
-  if (fonts.mono) {
-    lines.push(`--font-mono: '${fonts.mono}', ui-monospace, monospace;`)
-  }
+  if (fonts.display_latin) push('--font-display-latin', fonts.display_latin, 'ui-serif, Georgia, serif')
+  if (fonts.body_latin) push('--font-body-latin', fonts.body_latin, 'ui-sans-serif, system-ui, sans-serif')
+  if (fonts.display_arab) push('--font-display-arab', fonts.display_arab, "'Amiri', serif")
+  if (fonts.section_arab) push('--font-section-arab', fonts.section_arab, "'Cairo', sans-serif")
+  if (fonts.body_arab) push('--font-body-arab', fonts.body_arab, "'Cairo', sans-serif")
+  if (fonts.quran_arab) push('--font-quran-arab', fonts.quran_arab, "'Amiri', serif")
+  if (fonts.mono) push('--font-mono', fonts.mono, 'ui-monospace, monospace')
   return `:root {\n  ${lines.join('\n  ')}\n}`
 }
 

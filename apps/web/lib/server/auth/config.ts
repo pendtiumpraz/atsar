@@ -52,7 +52,12 @@ export const authConfig = {
     // Email verification is mandatory before subscription becomes active.
     // See BACKEND.md §5.1.
     requireEmailVerification: true,
-    minPasswordLength: 8,
+    // Length floor enforced by better-auth itself. The wrapper in
+    // app/api/auth/[...all]/route.ts adds extra complexity rules (letter
+    // + digit, banned common-password list, anti-sequential) so a 12-char
+    // monolithic check happens at the gateway. NIST 800-63B priorities:
+    // length > forced character classes.
+    minPasswordLength: 12,
     maxPasswordLength: 128,
     autoSignIn: false,
     // Vercel-compatible password hashing. Native Argon2 is not allowed on

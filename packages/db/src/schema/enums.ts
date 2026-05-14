@@ -65,12 +65,7 @@ export const deathStatusEnum = pgEnum('death_status_enum', [
   // 'alive' deliberately excluded — see IDEAS §2.0c
 ])
 
-export const deathCauseEnum = pgEnum('death_cause_enum', [
-  'natural',
-  'martyr',
-  'killed',
-  'unknown',
-])
+export const deathCauseEnum = pgEnum('death_cause_enum', ['natural', 'martyr', 'killed', 'unknown'])
 
 export const contentStatusEnum = pgEnum('content_status_enum', [
   'draft',
@@ -120,11 +115,7 @@ export const subscriptionStatusEnum = pgEnum('subscription_status_enum', [
   'cancelled',
 ])
 
-export const paymentStatusEnum = pgEnum('payment_status_enum', [
-  'pending',
-  'confirmed',
-  'rejected',
-])
+export const paymentStatusEnum = pgEnum('payment_status_enum', ['pending', 'confirmed', 'rejected'])
 
 export const paymentMethodEnum = pgEnum('payment_method_enum', [
   'manual_transfer',
@@ -132,11 +123,7 @@ export const paymentMethodEnum = pgEnum('payment_method_enum', [
   'xendit',
 ])
 
-export const quotaTypeEnum = pgEnum('quota_type_enum', [
-  'pdf_download',
-  'ai_chat',
-  'ai_tokens',
-])
+export const quotaTypeEnum = pgEnum('quota_type_enum', ['pdf_download', 'ai_chat', 'ai_tokens'])
 
 export const aiRoleEnum = pgEnum('ai_role_enum', [
   'chat',
@@ -160,24 +147,11 @@ export const aiRequestTypeEnum = pgEnum('ai_request_type_enum', [
   'image',
 ])
 
-export const aiUsageStatusEnum = pgEnum('ai_usage_status_enum', [
-  'success',
-  'error',
-  'timeout',
-])
+export const aiUsageStatusEnum = pgEnum('ai_usage_status_enum', ['success', 'error', 'timeout'])
 
-export const fontScriptEnum = pgEnum('font_script_enum', [
-  'latin',
-  'arabic',
-  'mono',
-  'both',
-])
+export const fontScriptEnum = pgEnum('font_script_enum', ['latin', 'arabic', 'mono', 'both'])
 
-export const fontSourceEnum = pgEnum('font_source_enum', [
-  'google_fonts',
-  'custom_url',
-  'uploaded',
-])
+export const fontSourceEnum = pgEnum('font_source_enum', ['google_fonts', 'custom_url', 'uploaded'])
 
 export const fontRoleEnum = pgEnum('font_role_enum', [
   'display_latin',
@@ -212,11 +186,7 @@ export const figureLocationRoleEnum = pgEnum('figure_location_role_enum', [
   'burial',
 ])
 
-export const battleTypeEnum = pgEnum('battle_type_enum', [
-  'ghazwah',
-  'sariyyah',
-  'futuhat',
-])
+export const battleTypeEnum = pgEnum('battle_type_enum', ['ghazwah', 'sariyyah', 'futuhat'])
 
 export const battleOutcomeEnum = pgEnum('battle_outcome_enum', [
   'victory',
@@ -247,11 +217,7 @@ export const battleParticipantRoleEnum = pgEnum('battle_participant_role_enum', 
  * `'both'` is reserved for envoys, witnesses, or figures who switched sides
  * mid-engagement.
  */
-export const battleSideEnum = pgEnum('battle_side_enum', [
-  'muslim',
-  'opponent',
-  'both',
-])
+export const battleSideEnum = pgEnum('battle_side_enum', ['muslim', 'opponent', 'both'])
 
 export const pdfJobTypeEnum = pgEnum('pdf_job_type_enum', ['single', 'multi', 'category'])
 
@@ -299,6 +265,8 @@ export const auditActionEnum = pgEnum('audit_action_enum', [
   'hard_delete',
   'login',
   'logout',
+  'login_failure',
+  'lockout',
   'role_change',
   'permission_change',
   'config_change',
