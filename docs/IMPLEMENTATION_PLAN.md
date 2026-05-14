@@ -446,6 +446,65 @@
 
 ---
 
+## Phase 7.5 — Post-Launch Audit Fixes (2026-05-13/14)
+
+> Audit komprehensif setelah login pertama nyata. User menemukan banyak FE↔BE mismatch yang silent (empty data, broken nav). Diperbaiki via 3 swarm-agent paralel.
+
+### 7.5.1 Auth + Login Resolution
+- [x] **Better-auth drizzle adapter**: drop `usePlural:true` (caused `userss` lookup), add `crypto.randomUUID()` generator (DB columns are uuid), map `session.token → tokenHash`, drop snake_case field mappings (adapter resolves via Drizzle JS keys not SQL names). Commit `8f2de2c`.
+- [x] **Admin/reviewer bypass subscription gate** via `getUserRoleSlugs()` + `STAFF_ROLES` check in `(app)/layout.tsx`. Commit `efb86cc`.
+- [x] **RBAC Redis quota fallback**: tolerate Upstash 500k limit errors instead of 500ing every API. Commit `94bb819`.
+- [x] **Global Redis Proxy**: wrap entire client with try/catch fallback (reads→null/[]/0, writes→silent). Commit `c648223`.
+
+### 7.5.2 FE↔BE Contract Audit
+- [x] **Category slug mismatch fix**: FE used `nabi-rasul`, `tabiut-tabiin`, `ulama-salaf`, `shahabiyat` but DB seeded `nabi`, `tabiut_tabiin`, `shalih_pasca_rasul`, gender-filter for shahabiyat. Fixed across 5 files (figure-filter-bar, map/layer-controls, 3 timeline components). Commit `6509664`.
+- [x] **perPage max 100→250** in figure/battle schemas so timeline `perPage:200` queries return 200 OK instead of 422. Commit `c648223`.
+- [ ] **Pagination envelope `.rows`**: 11 components destructure `data.rows` but client returns array directly (`figure-grid`, `comparison-picker`, `timeline-comparison`, `ulama-salaf-plus`, `pdf-builder/figure-picker`, `admin/users/user-table`, `admin/audit/audit-table`, `admin/trash/trash-table`, `pdf-builder/jobs page`, `billing/usage page`). **Status: TODO — high impact, fix next.**
+- [ ] **snake_case ApiFigure typings**: `comparison-picker.tsx:27-35`, `timeline-comparison.tsx:35-49`, `ulama-salaf-plus.tsx:31-44` use `name_full_id` / `birth_date_ah` while API serializes camelCase. Timeline never renders bars. **Status: TODO**.
+- [ ] **Phantom filter fields**: `ulama-salaf-plus` filters by `specializations` (real col: `specialty`), `mazhab` (real: `madhab`), `region` (doesn't exist on figures). Mazhab values `'Syafii'` vs DB `shafii`. **Status: TODO**.
+- [ ] **PATCH vs PUT mismatch**: 9 admin update endpoints export `PUT` but FE calls `api.patch()` → 405 across the board (figures, battles, quizzes, locations, users, roles, fonts, whitelist; citations missing entirely). **Status: TODO — high impact, breaks every edit form**.
+- [ ] **`db.transaction()` on Neon HTTP**: `user.service.invite/setRoles`, `role.service.setPermissions`, `menu.service.setRoleAccess`, `app/api/jobs/research` (legacy path). Throws at runtime. **Partial: fixed in figure ingest path; rest TODO**.
+
+### 7.5.3 Admin Navigation & Login UX (commit `2894d1a`)
+- [x] **`GET /api/v1/me/menu`** route — joins `menu_items × role_menu_access` for current user roles, returns ordered active items.
+- [x] **`getMyRoleSlugs()` server action** for client components to read roles without bundling auth instance.
+- [x] **Role-aware login redirect** in `login-form.tsx`: admin → `/admin/dashboard`, reviewer → `/queue`, else `/dashboard` (or `?from=` wins).
+- [x] **"Admin Panel" item in UserMenu** — appears only if user has `admin` role.
+- [x] **UserMenu rewrite**: use typed `useSession()` instead of broken `/api/auth/session` (better-auth endpoint is `/get-session`); use `authClient.signOut()` instead of raw fetch.
+- [x] **6 missing menu_items seeded**: `admin-dashboard`, `admin-menus`, `admin-locations`, `admin-payments`, `admin-trash-figures`, `admin-trash-battles`. Admin role gets `*` access via 005_role_menu_access.
+- [x] **AdminQuickActions extended** with links to roles, menus, subscriptions, locations, trash.
+- Verified: `GET /api/v1/me/menu` returns 14 `/admin/*` items for admin cookie; 401 for unauth.
+
+### 7.5.4 AI-Assisted Figure Ingest (commit `8aaf7b3`)
+- [x] **Schema**: new table `research_jobs` + enums `research_job_type_enum` (figure_ingest/battle_ingest/location_ingest) + `research_job_status_enum`. Migration `0002_worried_boomer.sql` applied to Neon.
+- [x] **`POST /api/v1/admin/figures/ingest`** — body `{name, category, gender?, hints?}`, returns 202 with jobId. Permission: `figures.create`.
+- [x] **`GET /api/v1/admin/figures/ingest`** — recent jobs list (up to 50).
+- [x] **`GET /api/v1/admin/figures/ingest-jobs/[jobId]`** — single-job poll.
+- [x] **`/api/jobs/research` handler extended** to dispatch on `type: 'figure_ingest'` → loads job, fetches whitelist domains, runs `generateObject` against AI role `agent` with salaf-biographer system prompt + admin hints, writes `figures` row (status=draft) + citations rows, auto-assigns reviewer round-robin, queues embedding sub-job. `db.transaction` replaced with sequential inserts (Neon HTTP).
+- [x] **Admin page `/admin/figures`** with "Tambah Tokoh (AI)" dialog: form (name, category, gender, hints) → POST → toast → poll every 5s → "Lihat draf" deep-link to `/admin/figures/[slug]/edit` on completion. Recent jobs panel at bottom.
+- Local-dev caveat: QStash refuses to deliver to localhost (`endpoint resolves to a loopback address`). Production/Vercel preview works normally.
+
+### 7.5.5 AI Provider Admin UI — TODO
+- [ ] `app/(admin)/admin/ai-providers/page.tsx` — providers tab + role-assignment matrix tab.
+- [ ] `app/(admin)/admin/ai-providers/[id]/page.tsx` — provider detail + models sub-table.
+- [ ] `GET/POST/PUT/DELETE /api/v1/admin/ai-providers` + nested `/models` + `/ai-role-assignments`.
+- [ ] API key encryption at rest via `AI_MASTER_KEY` (AES-256-GCM); write-only field; never returned decrypted; mask as `sk-...XYZ` in responses.
+- [ ] Add permission `ai.manage`; grant to admin.
+- (Partial WIP exists in unstaged files — needs completion + commit.)
+
+### 7.5.6 Ghazwah Coordinates Backfill (commit `ed7e61c`)
+- [x] 2/15 battles missing `locationId` — Ghazwah Bani Mushtaliq + Ghazwah Hunain. Added `muraysi` location (23.50N, 38.95E), `hunayn` already existed. Verified 0/15 missing after backfill.
+
+### 7.5.7 Landing Page Spoiler Fixes (commits `5af5dfc`, `59c6ebf`, `836c6f4`)
+- [x] **MapSpoiler rebuild**: dropped stylized SVG band → MapLibre real CARTO basemap (light_all/dark_all theme-aware) with 9 historical region polygons (Hijaz/Najd/Yaman/Syam/Iraq/Misr/Khurasan/Andalusia/Maghrib) overlaid on actual world, 15 city pins with real lng/lat, Hijrah route dashed, NavigationControl + ScaleControl.
+- [x] **Dynamic import isolation**: `next/dynamic({ssr:false})` cannot be called from Server Component → split into `map-spoiler-loader.tsx` (client wrapper) + interactive map.
+- [x] **CARTO URL fix**: `/raster/voyager/...` path doesn't exist on CDN (404 → blank tiles) → use `/light_all/...` matching the in-app map.
+- [x] **TimelineSpoiler**: `LABEL_GUTTER=240` + `PADDING_RIGHT=32`, subtitle fontSize 11→10 so "Imam al-Bukhari" + "Tabi'ut Tabi'in · 194 H – 256 H" fit.
+
+**Phase 7.5 status**: 23/29 items completed. Remaining 6 items (3 FE↔BE TODOs + PATCH/PUT + db.transaction sweep + AI provider UI) carried into Phase 8.
+
+---
+
 ## Phase 8 — Testing & QA
 
 ### 8.1 Automated
