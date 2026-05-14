@@ -1,247 +1,73 @@
 // Multi-tokoh comparison timeline (WIREFRAMES §8).
 //
-// Wraps `vis-timeline` in a React-friendly component.  Each figure becomes
-// its own *group* (lane), and renders as a single bar spanning
-// `birth_date_ah → death_date_ah`.  When a figure exposes `events`, those
-// are rendered as point items overlaid on the same group.
+// Renders the picker's selection as a clean SVG range-bar chart with
+// dual H/M axis. Was previously powered by `vis-timeline/standalone`,
+// but that library mutates DOM imperatively and had repeated empty-
+// canvas symptoms on prod (race with React 19 strict-mode). The
+// landing-page spoiler at `components/marketing/timeline-spoiler.tsx`
+// uses pure SVG and has worked since day one — we adopt that pattern
+// here. Shared renderer lives in `./timeline-svg.tsx`.
 //
-// `vis-timeline` is imperative (it mutates the DOM directly) so we keep the
-// canonical state in refs and rebuild the dataset whenever the `figures`
-// prop changes.  We never mount more than one Timeline instance — destroy
-// + recreate on prop change keeps `useEffect` cleanup honest.
-//
-// AH → JS-Date approximation:
-//   - vis-timeline's axis only understands JS Dates.  We project AH years
-//     onto a synthetic calendar using `ahToCe` from `@athar/hijri` so the
-//     axis labels (when mode='m') line up with real CE years; otherwise we
-//     overlay an H-only formatter via `format.minorLabels`.
+// State for the comparison still lives in the URL (`?ids=a,b,c`). The
+// `<ComparisonTimelineView>` wrapper reads `?ids` via
+// `useSearchParams`, fetches all six canonical figure categories, and
+// hands a flat `ComparisonFigure[]` to the SVG renderer.
 
 'use client'
 
 import type { CalendarMode } from '@athar/shared'
-import { ahToCe } from '@athar/hijri'
 import { useQueries } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { figuresApi } from '@/lib/api/endpoints'
 
-// vis-timeline ships its CSS as a separate file.  Static side-effect
-// import lets Next's CSS pipeline pick it up at build time without
-// blowing up the server build (CSS imports are safe in 'use client'
-// modules).
-import 'vis-timeline/styles/vis-timeline-graph2d.min.css'
+import { TimelineSvg, type TimelineSvgFigure } from './timeline-svg'
 
 export interface ComparisonFigure {
   id: string
   slug: string
   // Field naming: API serialises Drizzle rows verbatim — camelCase, never
-  // snake_case.  Sticking snake_case here would silently leave the timeline
-  // empty because every per-figure read below would be `undefined`.
+  // snake_case. Sticking with snake_case here would silently leave the
+  // timeline empty because every per-figure read below would be undefined.
   nameFullId?: string | null
   nameFullAr?: string | null
   gender?: 'male' | 'female' | null
   birthDateAh?: number | null
   deathDateAh?: number | null
-  /**
-   * Optional point markers (e.g. bi'tsah, masuk Islam).  Each event must
-   * carry an AH year — we project to a JS Date in the same way as the
-   * birth/death range.
-   */
+  /** Optional point markers (bi'tsah, masuk Islam, etc). */
   events?: Array<{ id?: string; ah: number; label: string }>
 }
 
 export interface TimelineComparisonProps {
   figures: ComparisonFigure[]
-  mode: CalendarMode
+  /** Reserved for future single/dual axis toggle. SVG renderer always shows H + M. */
+  mode?: CalendarMode
 }
 
-/**
- * Convert an AH year (possibly negative for SH) to a JS Date sortable by
- * vis-timeline.  We use the hijri converter so M-mode axis labels line up
- * with real CE years; for H-only mode we still need a Date object but the
- * custom formatter renders AH on top.
- */
-function ahYearToDate(ah: number): Date {
-  // Treat the first day of the AH year as Jan 1 of the corresponding CE year.
-  // Good enough for year-only data — full month/day precision is out of
-  // scope here (figure data only has year granularity).
-  const ce = ahToCe(ah)
-  return new Date(Date.UTC(ce, 0, 1))
-}
-
-/** Inverse: best-effort CE→AH for axis tick labels. */
-function dateToAhLabel(date: Date): number {
-  const ce = date.getUTCFullYear()
-  // Inline the conversion from packages/hijri (mirror of ceToAh).
-  return Math.round(((ce - 622) * 365.2425) / 354.367)
-}
-
-function figureLabel(f: ComparisonFigure): string {
-  return f.nameFullId || f.nameFullAr || f.slug
-}
-
-export function TimelineComparison({ figures, mode }: TimelineComparisonProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  // Hold the Timeline so we can destroy it on cleanup or rebuild.
-  const timelineRef = useRef<unknown>(null)
-
-  useEffect(() => {
-    if (!containerRef.current) return
-    if (figures.length === 0) return
-
-    let cancelled = false
-
-    // `vis-timeline/standalone` ships a heavy bundle (and CSS) — only load
-    // on the client.  Dynamic import keeps SSR happy and avoids the
-    // "self is not defined" error on Node.
-    void (async () => {
-      const visModule = await import('vis-timeline/standalone')
-      if (cancelled || !containerRef.current) return
-
-      const { Timeline, DataSet } = visModule as unknown as {
-        Timeline: new (
-          container: HTMLElement,
-          items: unknown,
-          groups: unknown,
-          options: Record<string, unknown>,
-        ) => { destroy: () => void; setOptions: (o: Record<string, unknown>) => void }
-        DataSet: new (rows: unknown[]) => unknown
-      }
-
-      // Items: one range bar per figure + optional event points.
-      const items: Array<Record<string, unknown>> = []
-      for (const f of figures) {
-        const birth = typeof f.birthDateAh === 'number' ? f.birthDateAh : null
-        const death = typeof f.deathDateAh === 'number' ? f.deathDateAh : null
-        if (birth === null && death === null) continue
-
-        const startAh = birth ?? (death !== null ? death - 60 : 0)
-        const endAh = death ?? (birth !== null ? birth + 60 : startAh + 1)
-
-        items.push({
-          id: f.id,
-          group: f.id,
-          start: ahYearToDate(startAh),
-          end: ahYearToDate(endAh),
-          content: figureLabel(f),
-          type: 'range',
-          className:
-            f.gender === 'female' ? 'athar-timeline-female' : 'athar-timeline-male',
-          title: `${figureLabel(f)} — ${birth ?? '?'}H s/d ${death ?? '?'}H`,
-        })
-
-        if (f.events) {
-          for (const evt of f.events) {
-            items.push({
-              id: `${f.id}:${evt.id ?? evt.ah}`,
-              group: f.id,
-              start: ahYearToDate(evt.ah),
-              content: evt.label,
-              type: 'point',
-              title: `${evt.label} (${evt.ah}H)`,
-            })
-          }
-        }
-      }
-
-      const groups = figures.map((f) => ({
+export function TimelineComparison({ figures }: TimelineComparisonProps) {
+  // Map to the renderer's input shape — they're structurally compatible
+  // but the explicit conversion documents the contract.
+  const rows: TimelineSvgFigure[] = useMemo(
+    () =>
+      figures.map((f) => ({
         id: f.id,
-        content: figureLabel(f),
-      }))
-
-      // Axis formatter: render H labels when mode != 'm'.  We piggy-back on
-      // the year-granularity tick and override its text content.
-      const yearFormatter = (date: Date) => {
-        const ah = dateToAhLabel(date)
-        const ce = date.getUTCFullYear()
-        if (mode === 'h') return `${ah}H`
-        if (mode === 'm') return `${ce}M`
-        return `${ah}H / ${ce}M`
-      }
-
-      const options: Record<string, unknown> = {
-        stack: false,
-        showCurrentTime: false,
-        zoomable: true,
-        moveable: true,
-        horizontalScroll: true,
-        orientation: { axis: 'top', item: 'top' },
-        margin: { item: 8, axis: 12 },
-        format: {
-          minorLabels: { year: 'yyyy' },
-          majorLabels: { year: '' },
-        },
-      }
-
-      if (containerRef.current && timelineRef.current) {
-        // Destroy previous instance before rebuilding so we don't stack
-        // multiple DOM trees inside the same container.
-        try {
-          ;(timelineRef.current as { destroy: () => void }).destroy()
-        } catch {
-          /* noop */
-        }
-        timelineRef.current = null
-      }
-
-      const timeline = new Timeline(
-        containerRef.current,
-        new DataSet(items),
-        new DataSet(groups),
-        options,
-      )
-      timelineRef.current = timeline
-
-      // Custom axis tick formatting — vis-timeline ships a hook
-      // (`format.minorLabels` as a function), but the typed API is loose,
-      // so we use `setOptions` for the function variant.
-      try {
-        timeline.setOptions({
-          format: {
-            minorLabels: (date: Date) => yearFormatter(date),
-          },
-        })
-      } catch {
-        /* tolerated — older API just keeps yyyy label */
-      }
-    })()
-
-    return () => {
-      cancelled = true
-      if (timelineRef.current) {
-        try {
-          ;(timelineRef.current as { destroy: () => void }).destroy()
-        } catch {
-          /* noop */
-        }
-        timelineRef.current = null
-      }
-    }
-  }, [figures, mode])
-
-  if (figures.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-8 text-center text-sm text-[rgb(var(--text-muted))]">
-        Pilih tokoh di atas untuk memulai komparasi.
-      </div>
-    )
-  }
+        slug: f.slug,
+        nameFullId: f.nameFullId,
+        nameFullAr: f.nameFullAr,
+        gender: f.gender,
+        birthDateAh: f.birthDateAh,
+        deathDateAh: f.deathDateAh,
+        events: f.events,
+      })),
+    [figures],
+  )
 
   return (
-    <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-2">
-      <div
-        ref={containerRef}
-        className="min-h-[24rem] w-full text-sm text-[rgb(var(--text))]"
-        // Inline height is intentional: vis-timeline reads
-        // `el.offsetHeight` synchronously inside its constructor, before
-        // the Tailwind `min-h-[24rem]` class has had a chance to apply on
-        // first paint. Without a measurable height the canvas mounts at
-        // 0px and never renders any axis/bars (the bug users saw).
-        style={{ minHeight: '24rem', height: '24rem' }}
-        aria-label="Timeline komparasi tokoh"
-      />
-    </div>
+    <TimelineSvg
+      figures={rows}
+      emptyMessage="Belum ada tokoh terpilih, atau data tidak ditemukan. Coba pilih tokoh dari dropdown di atas."
+    />
   )
 }
 
@@ -250,18 +76,19 @@ export function TimelineComparison({ figures, mode }: TimelineComparisonProps) {
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Convenience wrapper used by the `/timeline` server page.  Reads
- * `?ids=a,b,c` from the URL, fetches each figure by slug (we treat the
- * id-list as slugs because the picker writes API ids — but for SSR
- * deep-links the page author can pass slugs too; both round-trip the
- * `figuresApi.list` cache), and renders the timeline.
+ * Convenience wrapper used by the `/timeline` server page. Reads
+ * `?ids=a,b,c` from the URL, fetches each figure id, and renders the
+ * SVG timeline.
  *
- * The picker mutates the URL — this component reacts.  Keeping the two
- * loosely coupled via the URL lets the server page hydrate without a
- * shared store.
+ * IMPORTANT: load *all six* canonical figure categories. The picker
+ * only writes ids from sahabat/tabiin/tabiut_tabiin, but a viewer can
+ * deep-link any id through `?ids=`. If a passed id belongs to e.g.
+ * `shalih_pasca_rasul` (modern ulama) or `shalih_pre_rasul` (pre-
+ * Islamic righteous), it would otherwise miss every lookup below and
+ * silently produce an empty `figures` array → empty canvas.
  */
 export interface ComparisonTimelineViewProps {
-  /** Calendar display mode (currently fixed to 'h' — picker for mode lives in P5-1). */
+  /** Calendar display mode. Currently informational — SVG always renders dual H+M. */
   mode?: CalendarMode
 }
 
@@ -269,20 +96,14 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
   const sp = useSearchParams()
   const idsParam = sp.get('ids') ?? ''
   const ids = useMemo(
-    () => idsParam.split(',').map((s) => s.trim()).filter((s) => s.length > 0),
+    () =>
+      idsParam
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
     [idsParam],
   )
 
-  // We can't fetch by id directly with the current endpoint surface — but
-  // `figuresApi.list` returns all rows so we can match client-side.  Cache
-  // is shared with the picker (same query key).
-  //
-  // IMPORTANT: load *all six* canonical figure categories. The picker only
-  // writes ids from sahabat/tabiin/tabiut_tabiin, but a viewer can deep-link
-  // any id through `?ids=`. If a passed id belongs to e.g.
-  // `shalih_pasca_rasul` (modern ulama) or `shalih_pre_rasul` (pre-Islamic
-  // righteous), it would otherwise miss every lookup below and silently
-  // produce an empty `figures` array → canvas renders the empty state.
   const cats = useQueries({
     queries: [
       { queryKey: ['figures', { category: 'sahabat', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'sahabat', perPage: 200 }), staleTime: 5 * 60 * 1000 },
@@ -294,14 +115,26 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
     ],
   })
 
+  // Pluck out the six data refs by index. The fixed-length destructure
+  // makes the dep list static so `react-hooks/exhaustive-deps` (errored
+  // in this repo's lint config) stays satisfied — passing the dynamic
+  // `cats` array directly trips the rule.
+  const [d0, d1, d2, d3, d4, d5] = [
+    cats[0]?.data,
+    cats[1]?.data,
+    cats[2]?.data,
+    cats[3]?.data,
+    cats[4]?.data,
+    cats[5]?.data,
+  ]
   const allRows = useMemo<ComparisonFigure[]>(() => {
     const out: ComparisonFigure[] = []
-    for (const q of cats) {
-      const data = q.data as { rows?: ComparisonFigure[] } | undefined
-      if (data?.rows) out.push(...data.rows)
+    for (const data of [d0, d1, d2, d3, d4, d5]) {
+      const d = data as { rows?: ComparisonFigure[] } | undefined
+      if (d?.rows) out.push(...d.rows)
     }
     return out
-  }, [cats])
+  }, [d0, d1, d2, d3, d4, d5])
 
   const figures = useMemo(() => {
     if (ids.length === 0) return []
@@ -311,10 +144,9 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
       .map((id) => {
         const hit = byId.get(id)
         if (!hit && allRows.length > 0) {
-          // All category queries have responded with at least one row but
-          // the id is still missing — surface this so Vercel runtime logs
-          // pick up silent gaps (e.g. id belongs to a category not loaded
-          // here, or row was soft-deleted).
+          // All category queries have responded with at least one row
+          // but the id is still missing — surface so Vercel runtime
+          // logs catch silent gaps.
           console.error('[timeline] figure lookup miss', id)
         }
         return hit
@@ -322,8 +154,7 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
       .filter((x): x is ComparisonFigure => x !== undefined)
   }, [ids, allRows])
 
-  // Avoid hydration mismatch — empty state on initial render is fine since
-  // figure rows arrive async.  We still surface a loading hint.
+  // Avoid hydration mismatch — empty state on initial render is fine.
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => setHydrated(true), [])
 
