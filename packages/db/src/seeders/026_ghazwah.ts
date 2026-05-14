@@ -125,6 +125,7 @@ const BATTLES: BattleSeed[] = [
     eventDateAh: 5,
     eventDateCe: 627,
     eventDatePrecision: 'year',
+    locationSlug: 'muraysi',
     opponentForce: 'Bani Mushtaliq (Khuza\'ah)',
     outcome: 'victory',
     strategyId:
@@ -224,6 +225,7 @@ const BATTLES: BattleSeed[] = [
     eventDateCe: 630,
     eventDatePrecision: 'month',
     eventDateNotes: 'Syawwal 8 H, segera setelah Fath Makkah',
+    locationSlug: 'hunayn',
     opponentForce: 'Hawazin & Tsaqif',
     muslimCount: 12000,
     outcome: 'victory',

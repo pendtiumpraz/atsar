@@ -31,6 +31,7 @@ const LOCATIONS: LocSeed[] = [
   { slug: 'dzul-asyirah', nameAr: 'ذو العشيرة', nameId: "Dzul 'Asyirah", countryCode: 'SA', region: 'hijaz', lat: 23.9500, lng: 38.6500, descriptionId: "Lokasi Ghazwah Dzul 'Asyirah." },
   { slug: 'dzul-qarad', nameAr: 'ذو قرد', nameId: 'Dzul Qarad', countryCode: 'SA', region: 'hijaz', lat: 25.1000, lng: 39.4500, descriptionId: 'Lokasi Ghazwah Dzul Qarad (al-Ghabah).' },
   { slug: 'hunayn', nameAr: 'حنين', nameId: 'Hunain', countryCode: 'SA', region: 'hijaz', lat: 21.4500, lng: 40.2167, descriptionId: 'Lokasi Perang Hunain 8 H.' },
+  { slug: 'muraysi', nameAr: 'المريسيع', nameId: "Muraisi'", countryCode: 'SA', region: 'hijaz', lat: 23.5000, lng: 38.9500, descriptionId: 'Sumber air Bani Mushtaliq; lokasi Ghazwah Bani Mushtaliq 5 H.' },
   { slug: 'autas', nameAr: 'أوطاس', nameId: 'Autas', countryCode: 'SA', region: 'hijaz', lat: 21.5000, lng: 40.5000, descriptionId: 'Lokasi pertempuran Autas, lanjutan Perang Hunain.' },
 
   // ─── Najd ────────────────────────────────────────────────
