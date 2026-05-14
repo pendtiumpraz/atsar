@@ -42,26 +42,47 @@ const madhabValues = [
   'no_madhab',
 ] as const
 
+// Match `rijal_grade_enum` in packages/db/src/schema/enums.ts exactly —
+// any drift here would 422 the worker UPDATE.
 const rijalGradeValues = [
-  'shahabi_mutamad',
-  'tsiqah',
-  'shaduq',
-  'maqbul',
-  'da_if',
+  'sahabi_udul',
+  'thiqah_thiqah',
+  'thiqah_hafidz',
+  'thiqah',
+  'saduq',
+  'la_basa_bih',
+  'shalih_al_hadith',
+  'layyin',
+  'daif',
   'matruk',
-  'majhul',
+  'kadhdhab',
+  'not_narrator',
   'unverified',
 ] as const
 
-const deathCauseValues = [
-  'natural',
-  'martyred_battle',
-  'martyred_other',
-  'illness',
-  'plague',
-  'execution',
-  'accident',
-  'unknown',
+const deathCauseValues = ['natural', 'martyr', 'killed', 'unknown'] as const
+
+const figureLocationRoleValues = [
+  'birthplace',
+  'residence',
+  'dakwah',
+  'martyr',
+  'burial',
+] as const
+
+const figureRelationTypeValues = [
+  'teacher_of',
+  'student_of',
+  'father',
+  'mother',
+  'husband',
+  'wife',
+  'son',
+  'daughter',
+  'sibling',
+  'companion',
+  'descendant',
+  'ancestor',
 ] as const
 
 const FigureExtractionSchema = z.object({
@@ -95,6 +116,51 @@ const FigureExtractionSchema = z.object({
   biographyPreWafatId: z.string().nullable(),
   biographyPostWafatAr: z.string().nullable(),
   biographyPostWafatId: z.string().nullable(),
+  /**
+   * Lokasi utama yang erat dengan tokoh — diisi dengan NAMA kota/wilayah
+   * (mis. "Madinah", "Kufah", "Baghdad"). Worker akan lookup `locations`
+   * table untuk resolve ke ID. Bila nama tidak match row mana pun, field
+   * dibiarkan null pada figure row (worker log a warning).
+   */
+  primaryLocationName: z.string().nullable(),
+  deathLocationName: z.string().nullable(),
+  burialLocationName: z.string().nullable(),
+  /**
+   * Daftar lokasi yang punya peran spesifik dalam hidup tokoh
+   * (kelahiran, kediaman, dakwah, syahid, dimakamkan). Worker akan
+   * insert ke `figure_locations` setelah resolve nama → location_id.
+   * Periode opsional — bila sumber menyebut "tinggal di Bashrah dari
+   * 80H sampai 110H", isi periodStartAh=80 dan periodEndAh=110.
+   */
+  figureLocations: z
+    .array(
+      z.object({
+        nameId: z.string(),
+        nameAr: z.string().nullable(),
+        role: z.enum(figureLocationRoleValues),
+        periodStartAh: z.number().int().nullable(),
+        periodEndAh: z.number().int().nullable(),
+        notesId: z.string().nullable(),
+      }),
+    )
+    .default([]),
+  /**
+   * Hubungan non-nasab tokoh (guru, murid, sahabat, suami/istri, dll).
+   * Worker akan lookup figure target by name; bila tidak ditemukan,
+   * relasi di-skip dengan log (admin bisa tambah manual nanti). Untuk
+   * nasab linear (ayah → kakek → buyut) gunakan `nasabChain` — itu
+   * yang sudah ada upsert-on-missing-ancestor logic.
+   */
+  relations: z
+    .array(
+      z.object({
+        nameId: z.string(),
+        nameAr: z.string().nullable(),
+        relationType: z.enum(figureRelationTypeValues),
+        notesId: z.string().nullable(),
+      }),
+    )
+    .default([]),
   /**
    * Ancestral lineage ("nasab") — ordered child → parent → grandparent → …
    * Each entry is one generation up. Only emit when the source explicitly
@@ -165,8 +231,10 @@ const SYSTEM_PROMPT = [
   '3c. `madhab`: ulama-only. Allowed values: shafii, maliki, hanafi, hanbali, zhahiri, no_madhab.',
   '    For Sahabat / Tabi\'in / Tabi\'ut Tabi\'in leave null (madzhab fikih belum kristal di era mereka).',
   '3d. `rijalGrade`: hadith-narrator quality if the source states it. Allowed:',
-  '    shahabi_mutamad (Sahabat tsiqah secara default), tsiqah, shaduq, maqbul, da_if,',
-  '    matruk, majhul, unverified. Leave null when not stated.',
+  '    sahabi_udul (Sahabat — udul secara default), thiqah_thiqah, thiqah_hafidz,',
+  '    thiqah, saduq, la_basa_bih, shalih_al_hadith, layyin, daif, matruk,',
+  '    kadhdhab, not_narrator (bukan perawi hadits), unverified (belum diverifikasi).',
+  '    Leave null when not stated.',
   '4. Names: keep `*Ar` fields in original Arabic script. `*Id` fields are standard Indonesian',
   '   transliteration (e.g. "أبو بكر الصديق" → "Abu Bakr ash-Shiddiq"). Do not paraphrase.',
   '5. `summaryAr` / `summaryId`: 1-2 kalimat ringkas — siapa tokoh ini dalam satu nafas.',
@@ -200,10 +268,31 @@ const SYSTEM_PROMPT = [
   '5h. `hadithCountMin` / `hadithCountMax`: rentang jumlah hadits yang diriwayatkan.',
   '    Bila sumber menyebut angka pasti, set min = max. Bila menyebut "lebih dari N",',
   '    set min = N. Bila tidak ada angka, biarkan null.',
-  '5i. `deathCause`: sebab wafat bila disebut. Allowed: natural (wafat alami/usia',
-  '    tua), martyred_battle (syahid di medan perang), martyred_other (syahid bukan',
-  '    di perang, mis. dibunuh zalim), illness (sakit), plague (wabah/taun),',
-  '    execution (dihukum mati), accident (kecelakaan), unknown (tidak jelas).',
+  '5i. `deathCause`: sebab wafat bila disebut. Allowed: natural (wafat alami /',
+  '    sakit / usia tua), martyr (syahid dalam medan jihad atau dibunuh kafir),',
+  '    killed (dibunuh bukan karena syahadah — politik, qadli, dll),',
+  '    unknown (tidak jelas).',
+  '5j. Lokasi — tiga field tunggal + satu array:',
+  '    - `primaryLocationName`: kota/wilayah utama yang lekat dengan tokoh',
+  '      (mis. "Madinah" untuk Aisyah, "Kufah" untuk Abu Hanifah, "Bashrah"',
+  '      untuk Hasan al-Bashri). Tulis dalam ejaan Indonesia standar.',
+  '    - `deathLocationName`: tempat wafat bila disebut.',
+  '    - `burialLocationName`: tempat dimakamkan bila berbeda dari tempat wafat.',
+  '    - `figureLocations[]`: setiap entry punya `nameId` (Indonesia),',
+  '      `nameAr` (Arab, optional), `role` (birthplace | residence | dakwah |',
+  '      martyr | burial), dan `periodStartAh` / `periodEndAh` (opsional bila',
+  '      sumber menyebut rentang tahun). Boleh entry banyak per role (mis.',
+  '      tokoh pindah-pindah residence).',
+  '5k. Relasi non-nasab — `relations[]`:',
+  '    - Setiap entry punya `nameId` (target tokoh dalam Indonesia), `nameAr`,',
+  '      `relationType` (teacher_of | student_of | father | mother | husband |',
+  '      wife | son | daughter | sibling | companion | descendant | ancestor),',
+  '      dan `notesId` (opsional, 1 kalimat konteks).',
+  '    - Untuk nasab linear (ayah → kakek → buyut) gunakan `nasabChain`, bukan',
+  '      relations. relations untuk guru, murid, sahabat, pasangan, saudara,',
+  '      anak, dst.',
+  '    - HANYA emit relasi bila sumber menyebut secara eksplisit. Hindari',
+  '      menebak "kemungkinan murid dari X" tanpa basis.',
   '6. If sources conflict, prefer the higher-priority source; do NOT invent a synthesis.',
   '7. `nasabChain`: when sources EXPLICITLY list the ancestral lineage (Sirah Ibn',
   '   Hisham, biographical dictionaries, etc.), emit one entry per generation',
@@ -313,5 +402,10 @@ function emptyFigureData(): Omit<FigureExtractionResult, 'citations' | 'nasabCha
     biographyPreWafatId: null,
     biographyPostWafatAr: null,
     biographyPostWafatId: null,
+    primaryLocationName: null,
+    deathLocationName: null,
+    burialLocationName: null,
+    figureLocations: [],
+    relations: [],
   }
 }

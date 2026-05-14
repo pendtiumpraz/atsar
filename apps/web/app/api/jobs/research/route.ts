@@ -38,6 +38,7 @@ import {
   battles,
   citations,
   figureCategories,
+  figureLocations,
   figureRelations,
   figures,
   locations,
@@ -490,6 +491,16 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
   // unlikely event the citation batch fails, the orphan figure row will
   // be surfaced by the reviewer queue and can be cleaned up.
   const slugBase = slugify(figureData.nameFullId ?? input.figureName)
+
+  // Resolve single-FK location columns from extracted names. Best-effort —
+  // unresolved names land as null on the row; admin can fill manually.
+  const locationFkPatch = await resolveSingleLocationFields(
+    figureData.primaryLocationName,
+    figureData.deathLocationName,
+    figureData.burialLocationName,
+    log,
+  )
+
   const [row] = await db
     .insert(figures)
     .values({
@@ -498,16 +509,36 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
       gender: input.genderHint ?? figureData.gender ?? 'male',
       nameFullAr: figureData.nameFullAr ?? input.figureName,
       nameFullId: figureData.nameFullId ?? input.figureName,
+      nameShortAr: figureData.nameShortAr,
+      nameShortId: figureData.nameShortId,
       kunyahAr: figureData.kunyahAr,
       kunyahId: figureData.kunyahId,
+      laqabAr: figureData.laqabAr,
+      laqabId: figureData.laqabId,
       birthDateAh: figureData.birthDateAh,
+      birthDateCe: figureData.birthDateCe,
       deathDateAh: figureData.deathDateAh,
+      deathDateCe: figureData.deathDateCe,
+      deathCause: figureData.deathCause,
       socialCategory: figureData.socialCategory ?? null,
       specialty: figureData.specialty ?? null,
+      madhab: figureData.madhab,
+      rijalGrade: figureData.rijalGrade ?? 'unverified',
+      rijalNotesAr: figureData.rijalNotesAr,
+      rijalNotesId: figureData.rijalNotesId,
+      hadithCountMin: figureData.hadithCountMin,
+      hadithCountMax: figureData.hadithCountMax,
       summaryAr: figureData.summaryAr,
       summaryId: figureData.summaryId,
       biographyAr: figureData.biographyAr,
       biographyId: figureData.biographyId,
+      biographyPreWafatAr: figureData.biographyPreWafatAr,
+      biographyPreWafatId: figureData.biographyPreWafatId,
+      biographyPostWafatAr: figureData.biographyPostWafatAr,
+      biographyPostWafatId: figureData.biographyPostWafatId,
+      primaryLocationId: locationFkPatch.primaryLocationId ?? null,
+      deathLocationId: locationFkPatch.deathLocationId ?? null,
+      burialLocationId: locationFkPatch.burialLocationId ?? null,
       status: 'draft',
       createdBy: input.createdBy ?? null,
     })
@@ -560,6 +591,26 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
         'nasab chain insert failed (non-fatal)',
       )
     }
+  }
+
+  // ── 4c. figure_locations rows from AI's `figureLocations[]` ─────────
+  try {
+    await insertFigureLocations(row.id, figureData.figureLocations ?? [], log)
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message, figureId: row.id },
+      'figureLocations insert failed (non-fatal)',
+    )
+  }
+
+  // ── 4d. figure_relations rows from AI's `relations[]` ───────────────
+  try {
+    await insertFigureRelations(row.id, figureData.relations ?? [], log)
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message, figureId: row.id },
+      'figureRelations insert failed (non-fatal)',
+    )
   }
 
   // ── 5. Reviewer auto-assign (best-effort) ───────────────────────────
@@ -1134,6 +1185,32 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     fieldsChanged.push(field)
   }
 
+  // 7b. Resolve single-FK location columns from AI's extracted names. In
+  //     enrich mode we only set IDs that are currently null; in replace mode
+  //     we honour them only if 'primary'/'death'/'burial' is in focusFields
+  //     (admin opted in). Surface as suggestions even when not auto-applied.
+  const locationFkPatch = await resolveSingleLocationFields(
+    figureData.primaryLocationName,
+    figureData.deathLocationName,
+    figureData.burialLocationName,
+    log,
+  )
+  if (locationFkPatch.primaryLocationId && !currentFigure.primaryLocationId) {
+    ;(patch as Record<string, unknown>).primaryLocationId = locationFkPatch.primaryLocationId
+    suggestions['primaryLocationId'] = locationFkPatch.primaryLocationId
+    previous['primaryLocationId'] = currentFigure.primaryLocationId
+  }
+  if (locationFkPatch.deathLocationId && !currentFigure.deathLocationId) {
+    ;(patch as Record<string, unknown>).deathLocationId = locationFkPatch.deathLocationId
+    suggestions['deathLocationId'] = locationFkPatch.deathLocationId
+    previous['deathLocationId'] = currentFigure.deathLocationId
+  }
+  if (locationFkPatch.burialLocationId && !currentFigure.burialLocationId) {
+    ;(patch as Record<string, unknown>).burialLocationId = locationFkPatch.burialLocationId
+    suggestions['burialLocationId'] = locationFkPatch.burialLocationId
+    previous['burialLocationId'] = currentFigure.burialLocationId
+  }
+
   // 8. UPDATE the figure row only if we actually have something to change.
   if (Object.keys(patch).length > 0) {
     await db
@@ -1146,6 +1223,36 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
         ...(job.createdBy ? { updatedBy: job.createdBy } : {}),
       })
       .where(eq(figures.id, currentFigure.id))
+  }
+
+  // 8b. Insert figure_locations rows from AI's `figureLocations[]`. Best
+  //     effort — onConflictDoNothing makes re-ingest idempotent.
+  try {
+    await insertFigureLocations(
+      currentFigure.id,
+      figureData.figureLocations ?? [],
+      log,
+    )
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message, figureId: currentFigure.id },
+      'figureLocations insert failed (non-fatal)',
+    )
+  }
+
+  // 8c. Insert figure_relations rows from AI's `relations[]`. Missing
+  //     targets are skipped + logged so admin can wire them manually.
+  try {
+    await insertFigureRelations(
+      currentFigure.id,
+      figureData.relations ?? [],
+      log,
+    )
+  } catch (err) {
+    log.warn(
+      { err: (err as Error).message, figureId: currentFigure.id },
+      'figureRelations insert failed (non-fatal)',
+    )
   }
 
   // 9. INSERT new citations. We never DELETE the old citations — they may
@@ -2291,6 +2398,207 @@ async function insertNasabChain(args: {
 
     childId = parentId
   }
+}
+
+// ─── Location + relation resolution helpers ────────────────────────────
+//
+// The AI emits NAMES for locations and related figures (it doesn't know our
+// DB IDs). These helpers do best-effort case-insensitive lookups against
+// `locations` (by nameId/nameAr/modernName) and `figures` (by nameFullId/
+// nameFullAr/nameShortId/nameShortAr). On miss we just log and skip —
+// admin can wire the relation manually from the edit page.
+
+async function resolveLocationByName(name: string): Promise<string | null> {
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return null
+  const pattern = `%${trimmed}%`
+  const row = await db.query.locations.findFirst({
+    where: and(
+      isNull(locations.deletedAt),
+      or(
+        ilike(locations.nameId, pattern),
+        ilike(locations.nameAr, pattern),
+        ilike(locations.modernName, pattern),
+      ),
+    ),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
+async function resolveFigureByName(name: string): Promise<string | null> {
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return null
+  const pattern = `%${trimmed}%`
+  const row = await db.query.figures.findFirst({
+    where: and(
+      isNull(figures.deletedAt),
+      or(
+        ilike(figures.nameFullId, pattern),
+        ilike(figures.nameFullAr, pattern),
+        ilike(figures.nameShortId, pattern),
+        ilike(figures.nameShortAr, pattern),
+      ),
+    ),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
+interface ExtractedLocationEntry {
+  nameId: string
+  nameAr: string | null
+  role: 'birthplace' | 'residence' | 'dakwah' | 'martyr' | 'burial'
+  periodStartAh: number | null
+  periodEndAh: number | null
+  notesId: string | null
+}
+
+interface ExtractedRelationEntry {
+  nameId: string
+  nameAr: string | null
+  relationType:
+    | 'teacher_of'
+    | 'student_of'
+    | 'father'
+    | 'mother'
+    | 'husband'
+    | 'wife'
+    | 'son'
+    | 'daughter'
+    | 'sibling'
+    | 'companion'
+    | 'descendant'
+    | 'ancestor'
+  notesId: string | null
+}
+
+/**
+ * Resolve the three single-FK location fields (primary/death/burial) on
+ * `figures`. Returns a partial patch that can be spread into an update or
+ * INSERT. Best-effort: unresolved names produce no patch entry + a log.
+ */
+async function resolveSingleLocationFields(
+  primaryName: string | null | undefined,
+  deathName: string | null | undefined,
+  burialName: string | null | undefined,
+  log: JobLogger,
+): Promise<{
+  primaryLocationId?: string
+  deathLocationId?: string
+  burialLocationId?: string
+}> {
+  const out: {
+    primaryLocationId?: string
+    deathLocationId?: string
+    burialLocationId?: string
+  } = {}
+  if (primaryName) {
+    const id = await resolveLocationByName(primaryName)
+    if (id) out.primaryLocationId = id
+    else log.warn({ name: primaryName }, 'primaryLocation name not found in locations table')
+  }
+  if (deathName) {
+    const id = await resolveLocationByName(deathName)
+    if (id) out.deathLocationId = id
+    else log.warn({ name: deathName }, 'deathLocation name not found')
+  }
+  if (burialName) {
+    const id = await resolveLocationByName(burialName)
+    if (id) out.burialLocationId = id
+    else log.warn({ name: burialName }, 'burialLocation name not found')
+  }
+  return out
+}
+
+/**
+ * Insert `figure_locations` rows for each AI-extracted entry. Idempotent —
+ * the table has a partial unique index on (figureId, locationId, role) for
+ * active rows, so `onConflictDoNothing` is safe.
+ */
+async function insertFigureLocations(
+  figureId: string,
+  entries: ExtractedLocationEntry[],
+  log: JobLogger,
+): Promise<number> {
+  if (entries.length === 0) return 0
+  let inserted = 0
+  for (const entry of entries) {
+    const locationId = await resolveLocationByName(entry.nameId)
+    if (!locationId) {
+      log.warn(
+        { name: entry.nameId, role: entry.role },
+        'figureLocations: location name not found — skipping',
+      )
+      continue
+    }
+    try {
+      const res = await db
+        .insert(figureLocations)
+        .values({
+          figureId,
+          locationId,
+          role: entry.role,
+          periodStartAh: entry.periodStartAh,
+          periodEndAh: entry.periodEndAh,
+          notesId: entry.notesId,
+        })
+        .onConflictDoNothing()
+        .returning({ id: figureLocations.id })
+      if (res[0]) inserted++
+    } catch (err) {
+      log.warn(
+        { err: (err as Error).message, name: entry.nameId },
+        'figureLocations insert failed (non-fatal)',
+      )
+    }
+  }
+  return inserted
+}
+
+/**
+ * Insert `figure_relations` rows for each AI-extracted relation. Target
+ * figure is resolved by name; if missing we skip + log (admin curates
+ * manually later). Idempotent via composite unique index on
+ * (figureId, relatedId, relationType).
+ */
+async function insertFigureRelations(
+  sourceFigureId: string,
+  entries: ExtractedRelationEntry[],
+  log: JobLogger,
+): Promise<number> {
+  if (entries.length === 0) return 0
+  let inserted = 0
+  for (const entry of entries) {
+    const targetId = await resolveFigureByName(entry.nameId)
+    if (!targetId) {
+      log.warn(
+        { name: entry.nameId, type: entry.relationType },
+        'figureRelations: target figure not found — skipping',
+      )
+      continue
+    }
+    if (targetId === sourceFigureId) continue
+    try {
+      const res = await db
+        .insert(figureRelations)
+        .values({
+          figureId: sourceFigureId,
+          relatedId: targetId,
+          relationType: entry.relationType,
+          notesId: entry.notesId,
+        })
+        .onConflictDoNothing()
+        .returning({ id: figureRelations.id })
+      if (res[0]) inserted++
+    } catch (err) {
+      log.warn(
+        { err: (err as Error).message, name: entry.nameId },
+        'figureRelations insert failed (non-fatal)',
+      )
+    }
+  }
+  return inserted
 }
 
 async function markFailed(jobId: string, code: string, message: string): Promise<void> {
