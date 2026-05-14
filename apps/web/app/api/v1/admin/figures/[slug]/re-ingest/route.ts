@@ -172,11 +172,31 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
     publishError = err instanceof Error ? err.message : String(err)
     log.warn(
       { jobId: job.id, err: publishError },
-      'QStash publish failed — re-ingest job left pending for local debugging',
+      'QStash publish failed — falling back to inline self-fetch',
     )
-    // Same fall-through as the single-ingest endpoint: in local dev the
-    // tunnel often can't accept QStash callbacks. We leave the row pending
-    // so the admin can debug from the UI.
+
+    // QStash unavailable (quota, deduplication conflict, dev tunnel, etc.)
+    // — fire-and-forget a self-fetch to /api/jobs/research with the
+    // internal token so the worker still runs. We don't await; the admin
+    // gets a 202 immediately and polls the job row for status.
+    const origin = new URL(req.url).origin
+    const secret =
+      process.env['INTERNAL_JOB_TOKEN'] ?? process.env['BETTER_AUTH_SECRET']
+    if (secret) {
+      void fetch(`${origin}/api/jobs/research`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-token': secret,
+        },
+        body: JSON.stringify({ type: 'figure_reingest', jobId: job.id }),
+      }).catch((fetchErr) => {
+        log.error(
+          { jobId: job.id, err: String(fetchErr) },
+          'Inline self-fetch fallback also failed',
+        )
+      })
+    }
   }
 
   return ok(

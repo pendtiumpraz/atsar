@@ -38,6 +38,19 @@ export function withSignature(handler: JobHandler) {
   // "Collecting page data" pass doesn't need QStash signing keys present.
   let wrapped: ((req: Request) => Promise<Response> | Response) | null = null
   return async (req: Request): Promise<Response> => {
+    // Internal bypass for self-invocation when QStash publish fails (e.g.
+    // quota exhausted, deduplicationId collision). The producer endpoint
+    // (admin route) fires `fetch(/api/jobs/research, { X-Internal-Token })`
+    // with INTERNAL_JOB_TOKEN secret so the worker runs without leaving
+    // the cluster. Admin-only flow; tokens are required.
+    const internalToken = req.headers.get('x-internal-token')
+    const envToken =
+      process.env['INTERNAL_JOB_TOKEN'] ??
+      process.env['BETTER_AUTH_SECRET'] ??
+      null
+    if (internalToken && envToken && internalToken === envToken) {
+      return handler(req)
+    }
     if (!wrapped) wrapped = verifySignatureAppRouter(handler) as (
       req: Request,
     ) => Promise<Response> | Response

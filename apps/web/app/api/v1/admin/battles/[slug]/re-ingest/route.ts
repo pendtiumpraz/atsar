@@ -47,9 +47,17 @@ const RE_INGEST_FIELDS = [
   'casualtiesMuslim',
   'casualtiesOpponent',
   'strategyId',
+  'strategyAr',
   'narrativeId',
+  'narrativeAr',
   'significanceId',
+  'significanceAr',
+  // Single-FK relationships (resolved server-side by name → id lookup).
+  'commanderId',
+  'locationId',
   'citations',
+  // Virtual focus fields driving battle_participants / battle_phases
+  // sub-pipelines.
   'participants',
   'phases',
 ] as const
@@ -185,8 +193,27 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
     publishError = err instanceof Error ? err.message : String(err)
     log.warn(
       { jobId: job.id, err: publishError },
-      'QStash publish failed — re-ingest job left pending for local debugging',
+      'QStash publish failed — falling back to inline self-fetch',
     )
+    // QStash unavailable — fire-and-forget self-fetch with internal token.
+    const origin = new URL(req.url).origin
+    const secret =
+      process.env['INTERNAL_JOB_TOKEN'] ?? process.env['BETTER_AUTH_SECRET']
+    if (secret) {
+      void fetch(`${origin}/api/jobs/research`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-token': secret,
+        },
+        body: JSON.stringify({ type: 'battle_reingest', jobId: job.id }),
+      }).catch((fetchErr) => {
+        log.error(
+          { jobId: job.id, err: String(fetchErr) },
+          'Inline self-fetch fallback also failed',
+        )
+      })
+    }
   }
 
   return ok(
