@@ -17,6 +17,7 @@ import { headers } from 'next/headers'
 import { FigureCategoryTabs } from '@/components/figures/figure-category-tabs'
 import { FigureFilterBar } from '@/components/figures/figure-filter-bar'
 import { FigureGrid } from '@/components/figures/figure-grid'
+import { FigureIngestQuickAdd } from '@/components/figures/figure-ingest-quick-add'
 import { ListDetailShell } from '@/components/figures/list-detail-shell'
 import { auth } from '@/lib/server/auth'
 import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
@@ -64,6 +65,7 @@ export default async function FiguresPage({ searchParams }: FiguresPageProps) {
         >
           Tokoh
         </h1>
+        {isAdmin && <FigureIngestQuickAdd />}
       </div>
 
       <FigureCategoryTabs showTrash={isAdmin} />
