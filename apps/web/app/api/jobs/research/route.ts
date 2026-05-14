@@ -59,6 +59,7 @@ import {
   RateLimitExceededError,
   searchWhitelist,
   webSearchSalafi,
+  webSearchWithinWhitelist,
 } from '@/lib/server/research'
 
 export const runtime = 'nodejs'
@@ -116,6 +117,39 @@ async function fetchSources(
 type ExtractFigureAttempt =
   | { result: Awaited<ReturnType<typeof extractFigureData>> }
   | { failure: RunResearchFailure }
+
+// One fallback-tier: fetch candidate URLs, extract, accept the attempt
+// only if the AI produced a usable name. Returns a tagged union so
+// callers can propagate rate-limit / provider-error responses verbatim.
+type ExtractSuccess = { result: Awaited<ReturnType<typeof extractFigureData>> }
+type FallbackTierResult =
+  | { kind: 'accepted'; fetched: FetchedSource[]; attempt: ExtractSuccess }
+  | { kind: 'rate_limited'; err: RateLimitExceededError }
+  | { kind: 'failure'; failure: RunResearchFailure }
+  | { kind: 'no_match' }
+
+async function tryFallbackTier(
+  name: string,
+  urls: string[],
+  hints: string | undefined,
+  log: JobLogger,
+  label: string,
+): Promise<FallbackTierResult> {
+  if (urls.length === 0) return { kind: 'no_match' }
+  const fetch = await fetchSources(urls, log, label)
+  if (fetch.rateLimited) return { kind: 'rate_limited', err: fetch.rateLimited }
+  if (fetch.fetched.length === 0) return { kind: 'no_match' }
+  const attempt = await tryExtractFigure(name, fetch.fetched, hints, log)
+  if (!attempt) return { kind: 'no_match' }
+  if ('failure' in attempt) return { kind: 'failure', failure: attempt.failure }
+  if (
+    attempt.result.figureData.nameFullAr ||
+    attempt.result.figureData.nameFullId
+  ) {
+    return { kind: 'accepted', fetched: fetch.fetched, attempt }
+  }
+  return { kind: 'no_match' }
+}
 
 async function tryExtractFigure(
   name: string,
@@ -318,10 +352,12 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
   }
 
   // ── 1. Try whitelist sources first (preferred — vetted domains). ────
+  //    `whitelistDomainList` is loaded eagerly so the DDG fallback below
+  //    has access to it even when the caller supplied explicit sourceUrls.
+  const whitelistDomainList = await loadActiveWhitelist()
   let candidateUrls = input.sourceUrls ?? []
   if (candidateUrls.length === 0) {
-    const domains = await loadActiveWhitelist()
-    candidateUrls = await searchWhitelist(input.figureName, domains)
+    candidateUrls = await searchWhitelist(input.figureName, whitelistDomainList)
   }
   candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
 
@@ -336,55 +372,89 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
   }
 
   let fetched = fetchAttempt.fetched
-  let extraction = fetched.length > 0
-    ? await tryExtractFigure(input.figureName, fetched, input.hints, log)
-    : null
-  if (extraction && 'failure' in extraction) {
-    return extraction.failure
+  let extraction: ExtractSuccess | null = null
+  if (fetched.length > 0) {
+    const initial = await tryExtractFigure(
+      input.figureName,
+      fetched,
+      input.hints,
+      log,
+    )
+    if (initial && 'failure' in initial) return initial.failure
+    if (initial) extraction = initial
   }
 
-  // ── 2. DDG salafi fallback ───────────────────────────────────────────
-  // If whitelist gave zero usable sources, or extraction came back with no
-  // name (= sources irrelevant), retry via DuckDuckGo HTML with a
-  // "biografi salaf" suffix. No API key needed; results bias toward salafi
-  // articles by query keyword.
+  // ── 2. Fallback ladder ───────────────────────────────────────────────
+  //
+  //   Tier A — DDG search restricted to whitelist domains via `site:` OR.
+  //            Best signal: same trusted source set as the direct
+  //            whitelist URL builder, but DDG hands us the real article URL
+  //            instead of the noisy on-site search page.
+  //   Tier B — broader DDG search with "biografi salaf" suffix. Used only
+  //            when tier A returns nothing — covers figures whose biography
+  //            lives on non-whitelist (but still salaf-leaning) sites.
   const needsFallback =
     !extraction ||
-    !extraction.result.figureData.nameFullAr &&
-      !extraction.result.figureData.nameFullId
+    (!extraction.result.figureData.nameFullAr &&
+      !extraction.result.figureData.nameFullId)
   if (needsFallback) {
+    const topDomains = [...whitelistDomainList]
+      .sort((a, b) => b.priority - a.priority)
+      .map((d) => d.domain)
+
     log.warn(
       { figureName: input.figureName },
-      'whitelist path yielded no usable extraction — falling back to DDG salaf search',
+      'whitelist path yielded no usable extraction — tier A: DDG within whitelist',
     )
-    const ddgUrls = await webSearchSalafi(input.figureName, { limit: MAX_SOURCES * 2 })
-    if (ddgUrls.length > 0) {
-      const ddgAttempt = await fetchSources(ddgUrls, log, 'ddg-salaf')
-      if (ddgAttempt.rateLimited) {
+    const tierAUrls = await webSearchWithinWhitelist(input.figureName, topDomains, {
+      limit: MAX_SOURCES * 2,
+    })
+    const tierA = await tryFallbackTier(
+      input.figureName,
+      tierAUrls,
+      input.hints,
+      log,
+      'ddg-within-whitelist',
+    )
+    if (tierA.kind === 'rate_limited') {
+      return {
+        ok: false,
+        code: 'rate_limited',
+        message: tierA.err.message,
+        retryAfterMs: tierA.err.retryAfterMs,
+      }
+    }
+    if (tierA.kind === 'failure') return tierA.failure
+    if (tierA.kind === 'accepted') {
+      fetched = tierA.fetched
+      extraction = tierA.attempt
+    } else {
+      log.warn(
+        { figureName: input.figureName },
+        'tier A yielded nothing — tier B: broader DDG salaf search',
+      )
+      const tierBUrls = await webSearchSalafi(input.figureName, {
+        limit: MAX_SOURCES * 2,
+      })
+      const tierB = await tryFallbackTier(
+        input.figureName,
+        tierBUrls,
+        input.hints,
+        log,
+        'ddg-salaf',
+      )
+      if (tierB.kind === 'rate_limited') {
         return {
           ok: false,
           code: 'rate_limited',
-          message: ddgAttempt.rateLimited.message,
-          retryAfterMs: ddgAttempt.rateLimited.retryAfterMs,
+          message: tierB.err.message,
+          retryAfterMs: tierB.err.retryAfterMs,
         }
       }
-      if (ddgAttempt.fetched.length > 0) {
-        const ddgExtract = await tryExtractFigure(
-          input.figureName,
-          ddgAttempt.fetched,
-          input.hints,
-          log,
-        )
-        if (ddgExtract && 'failure' in ddgExtract) return ddgExtract.failure
-        if (
-          ddgExtract &&
-          (ddgExtract.result.figureData.nameFullAr ||
-            ddgExtract.result.figureData.nameFullId)
-        ) {
-          // DDG produced something usable — swap in.
-          fetched = ddgAttempt.fetched
-          extraction = ddgExtract
-        }
+      if (tierB.kind === 'failure') return tierB.failure
+      if (tierB.kind === 'accepted') {
+        fetched = tierB.fetched
+        extraction = tierB.attempt
       }
     }
   }
@@ -880,23 +950,25 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   }
 
   let fetched = whitelistFetch.fetched
-  let extractionAttempt = fetched.length > 0
-    ? await tryExtractFigure(payload.name, fetched, combinedHints, log)
-    : null
-  if (extractionAttempt && 'failure' in extractionAttempt) {
-    const failure = extractionAttempt.failure
-    if (failure.code === 'provider_not_configured') {
-      await markFailed(jobId, 'provider_not_configured', failure.message)
+  let extractionAttempt: ExtractSuccess | null = null
+  if (fetched.length > 0) {
+    const initial = await tryExtractFigure(payload.name, fetched, combinedHints, log)
+    if (initial && 'failure' in initial) {
+      const failure = initial.failure
+      if (failure.code === 'provider_not_configured') {
+        await markFailed(jobId, 'provider_not_configured', failure.message)
+        return Response.json(
+          { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
+          { status: 503 },
+        )
+      }
+      await markFailed(jobId, 'internal_error', failure.message)
       return Response.json(
-        { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
-        { status: 503 },
+        { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
+        { status: 500 },
       )
     }
-    await markFailed(jobId, 'internal_error', failure.message)
-    return Response.json(
-      { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
-      { status: 500 },
-    )
+    if (initial) extractionAttempt = initial
   }
 
   const needsFallback =
@@ -904,59 +976,82 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     (!extractionAttempt.result.figureData.nameFullAr &&
       !extractionAttempt.result.figureData.nameFullId)
   if (needsFallback) {
+    const topDomains = [...domains]
+      .sort((a, b) => b.priority - a.priority)
+      .map((d) => d.domain)
+
     log.warn(
       { jobId, name: payload.name },
-      'whitelist path yielded no usable extraction — falling back to DDG salaf search',
+      'whitelist path yielded no usable extraction — tier A: DDG within whitelist',
     )
-    const ddgUrls = await webSearchSalafi(payload.name, { limit: MAX_SOURCES * 2 })
-    if (ddgUrls.length > 0) {
-      const ddgFetch = await fetchSources(ddgUrls, log, 'ddg-salaf')
-      if (ddgFetch.rateLimited) {
-        await markFailed(jobId, 'rate_limited', ddgFetch.rateLimited.message)
+    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
+      limit: MAX_SOURCES * 2,
+    })
+    const tierA = await tryFallbackTier(
+      payload.name,
+      tierAUrls,
+      combinedHints,
+      log,
+      'ddg-within-whitelist',
+    )
+    const handleFallback = async (
+      tier: FallbackTierResult,
+    ): Promise<Response | { applied: true } | { applied: false }> => {
+      if (tier.kind === 'rate_limited') {
+        await markFailed(jobId, 'rate_limited', tier.err.message)
         return Response.json(
           {
             ok: false,
-            error: { code: 'RATE_LIMITED', message: ddgFetch.rateLimited.message },
+            error: { code: 'RATE_LIMITED', message: tier.err.message },
           },
           {
             status: 429,
             headers: {
-              'retry-after': String(Math.ceil(ddgFetch.rateLimited.retryAfterMs / 1000)),
+              'retry-after': String(Math.ceil(tier.err.retryAfterMs / 1000)),
             },
           },
         )
       }
-      if (ddgFetch.fetched.length > 0) {
-        const ddgExtract = await tryExtractFigure(
-          payload.name,
-          ddgFetch.fetched,
-          combinedHints,
-          log,
-        )
-        if (ddgExtract && 'failure' in ddgExtract) {
-          const failure = ddgExtract.failure
-          if (failure.code === 'provider_not_configured') {
-            await markFailed(jobId, 'provider_not_configured', failure.message)
-            return Response.json(
-              { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
-              { status: 503 },
-            )
-          }
-          await markFailed(jobId, 'internal_error', failure.message)
+      if (tier.kind === 'failure') {
+        const failure = tier.failure
+        if (failure.code === 'provider_not_configured') {
+          await markFailed(jobId, 'provider_not_configured', failure.message)
           return Response.json(
-            { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
-            { status: 500 },
+            { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
+            { status: 503 },
           )
         }
-        if (
-          ddgExtract &&
-          (ddgExtract.result.figureData.nameFullAr ||
-            ddgExtract.result.figureData.nameFullId)
-        ) {
-          fetched = ddgFetch.fetched
-          extractionAttempt = ddgExtract
-        }
+        await markFailed(jobId, 'internal_error', failure.message)
+        return Response.json(
+          { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
+          { status: 500 },
+        )
       }
+      if (tier.kind === 'accepted') {
+        fetched = tier.fetched
+        extractionAttempt = tier.attempt
+        return { applied: true }
+      }
+      return { applied: false }
+    }
+
+    const aOutcome = await handleFallback(tierA)
+    if (aOutcome instanceof Response) return aOutcome
+    if (!aOutcome.applied) {
+      log.warn(
+        { jobId, name: payload.name },
+        'tier A yielded nothing — tier B: broader DDG salaf search',
+      )
+      const tierBUrls = await webSearchSalafi(payload.name, { limit: MAX_SOURCES * 2 })
+      const tierB = await tryFallbackTier(
+        payload.name,
+        tierBUrls,
+        combinedHints,
+        log,
+        'ddg-salaf',
+      )
+      const bOutcome = await handleFallback(tierB)
+      if (bOutcome instanceof Response) return bOutcome
     }
   }
 

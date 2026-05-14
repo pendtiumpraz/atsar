@@ -34,6 +34,18 @@ export interface WebSearchOptions {
   timeoutMs?: number
 }
 
+export interface WebSearchWithinDomainsOptions {
+  /** Max URLs to return. Default 10. */
+  limit?: number
+  /** Hard ceiling on request, default 12s. */
+  timeoutMs?: number
+  /**
+   * Cap how many `site:` operators DDG receives in one query. DDG honours
+   * a handful, but long disjunctions degrade match quality. Default 6.
+   */
+  maxDomains?: number
+}
+
 /**
  * Run a websearch via DuckDuckGo HTML and return the top result URLs.
  *
@@ -53,11 +65,62 @@ export async function webSearchSalafi(
   if (!trimmed) return []
   const suffix = opts.suffix ?? 'biografi salaf'
   const fullQuery = `${trimmed} ${suffix}`.trim()
+  return runDdgQuery(fullQuery, opts.limit ?? 10, opts.timeoutMs)
+}
 
+/**
+ * DDG search restricted to a set of whitelist domains via `site:` operators.
+ *
+ * Builds a query like:
+ *   `<name> (site:dorar.net OR site:almanhaj.or.id OR ...)`
+ *
+ * DDG honours the disjunction up to a handful of domains; we cap with
+ * `maxDomains` (default 6) and pick the top-priority entries so noisy
+ * results from low-priority domains don't drown out vetted ones.
+ *
+ * Returns an empty array when DDG returns no usable results. The caller
+ * should fall through to `webSearchSalafi` (broader salaf-biased search)
+ * before giving up.
+ */
+export async function webSearchWithinWhitelist(
+  query: string,
+  domains: string[],
+  opts: WebSearchWithinDomainsOptions = {},
+): Promise<string[]> {
+  const trimmed = query.trim()
+  if (!trimmed || domains.length === 0) return []
+  const cap = opts.maxDomains ?? 6
+  const selected = domains.slice(0, cap)
+  const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
+  const fullQuery = `${trimmed} (${siteOps})`
+  const limit = opts.limit ?? 10
+  const urls = await runDdgQuery(fullQuery, limit, opts.timeoutMs)
+
+  // Defence in depth: filter to whitelist-only in case DDG returns
+  // off-domain results (rare but happens with edge cases like cached
+  // pages or AMP variants on third-party CDNs).
+  const allowed = new Set(selected.map((d) => d.toLowerCase()))
+  return urls.filter((u) => {
+    try {
+      const host = new URL(u).hostname.toLowerCase()
+      // Match host or any "<subdomain>.host" suffix against the whitelist.
+      return [...allowed].some((d) => host === d || host.endsWith(`.${d}`))
+    } catch {
+      return false
+    }
+  })
+}
+
+/** Core DDG HTML query runner. Returns parsed result URLs or []. */
+async function runDdgQuery(
+  fullQuery: string,
+  limit: number,
+  timeoutMs?: number,
+): Promise<string[]> {
   const controller = new AbortController()
   const timer = setTimeout(
     () => controller.abort(),
-    opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeoutMs ?? DEFAULT_TIMEOUT_MS,
   )
 
   let html: string
@@ -83,7 +146,7 @@ export async function webSearchSalafi(
     clearTimeout(timer)
   }
 
-  return parseDdgResults(html, opts.limit ?? 10)
+  return parseDdgResults(html, limit)
 }
 
 /**
