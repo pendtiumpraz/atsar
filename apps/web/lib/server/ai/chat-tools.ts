@@ -382,8 +382,13 @@ export function chatTools(userId: string | null) {
     // 60-second stream budget for marginal gain.
     search_web: tool({
       description:
-        'Cari sumber tambahan di website salafi whitelist (almanhaj, muslim.or.id, rumaysho, binbaz, dorar, dll). ' +
-        'Pakai HANYA kalau database Atsar tidak punya jawaban. Mengembalikan kandidat URL untuk dikutip.',
+        'PREVIEW kandidat URL whitelist (almanhaj, muslim.or.id, rumaysho, ' +
+        'binbaz, dorar, dll). HANYA mengembalikan daftar URL — TIDAK mengisi ' +
+        'database, TIDAK mengunjungi halaman, TIDAK extract isi. ' +
+        'JANGAN pakai tool ini ketika admin minta "update X dari websearch" — ' +
+        'untuk itu pakai reingest_figure / reingest_battle yang punya full ' +
+        'pipeline fetch + extract + save. Tool ini cuma untuk diagnostic ' +
+        '"sumber apa aja yang ada di whitelist" sebelum admin memutuskan.',
       parameters: z.object({
         query: z.string().min(1).max(200),
         limit: z.number().int().min(1).max(5).default(3),
@@ -681,8 +686,14 @@ export function adminChatTools(userId: string | null) {
     // Re-crawl existing figure. Confirm mode (enrich/replace) with admin.
     reingest_figure: tool({
       description:
-        'Re-crawl tokoh yang SUDAH ADA. Mode: "enrich" (isi kolom kosong saja) ' +
-        'atau "replace" (timpa). WAJIB tanya admin mode mana sebelum dipanggil.',
+        'PIPELINE LENGKAP untuk update tokyo: AI worker akan (1) crawl 30 ' +
+        'whitelist salafi sites, (2) fetch isi halaman, (3) extract jadi ' +
+        'structured data via generateObject, (4) UPDATE figures + INSERT ' +
+        'citations di database. INI YANG ADMIN MAKSUD ketika bilang "update ' +
+        'kisah X dari websearch" / "perbarui biografi X" / "timpa X". ' +
+        'JANGAN call search_web sebelum ini — worker sudah handle crawling. ' +
+        'Mode: "enrich" (isi kolom kosong saja) atau "replace" (timpa). ' +
+        'Tanya admin singkat: enrich atau replace? lalu LANGSUNG panggil tool ini.',
       parameters: z.object({
         slug: z
           .string()

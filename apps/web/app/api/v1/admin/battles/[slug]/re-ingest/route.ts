@@ -173,7 +173,7 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
       'research',
       { type: 'battle_reingest', jobId: job.id },
       {
-        deduplicationId: `battle-reingest:${battle.id}:${job.id}`,
+        deduplicationId: `battle-reingest-${battle.id}-${job.id}`,
       },
     )
     messageId = res.messageId

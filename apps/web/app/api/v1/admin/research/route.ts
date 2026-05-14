@@ -49,7 +49,7 @@ export const POST = withErrorHandling(async (req) => {
           delaySec,
           // Idempotency: if admin clicks the button twice within QStash's
           // retention window, the second publish is a no-op.
-          deduplicationId: `research:${input.categorySlug}:${figureName.toLowerCase()}`,
+          deduplicationId: `research-${input.categorySlug}-${figureName.toLowerCase()}`,
         },
       )
       enqueued.push({ figureName, messageId, delaySec })

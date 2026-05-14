@@ -146,7 +146,7 @@ export const POST = withErrorHandling(async (req) => {
       publishJob(
         'research',
         { type: 'figure_ingest', jobId },
-        { deduplicationId: `figure-ingest:${jobId}` },
+        { deduplicationId: `figure-ingest-${jobId}` },
       ).then((res) => ({ jobId, messageId: res.messageId })),
     ),
   )

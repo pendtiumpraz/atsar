@@ -64,7 +64,7 @@ export const POST = withErrorHandling(async (req) => {
       {
         // Idempotent: clicking submit twice within QStash's retention window
         // (and within the same minute) is a no-op on the queue side.
-        deduplicationId: `battle-ingest:${job.id}`,
+        deduplicationId: `battle-ingest-${job.id}`,
       },
     )
     messageId = res.messageId

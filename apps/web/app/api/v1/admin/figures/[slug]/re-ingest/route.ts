@@ -160,7 +160,7 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
       {
         // Idempotent per figure per minute — double-submitting the same
         // refresh button is a no-op on the queue side.
-        deduplicationId: `figure-reingest:${figure.id}:${job.id}`,
+        deduplicationId: `figure-reingest-${figure.id}-${job.id}`,
       },
     )
     messageId = res.messageId

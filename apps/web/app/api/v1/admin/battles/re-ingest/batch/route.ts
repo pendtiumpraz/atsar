@@ -226,7 +226,7 @@ export const POST = withErrorHandling(async (req) => {
       publishJob(
         'research',
         { type: 'battle_reingest', jobId },
-        { deduplicationId: `battle-reingest:${battle.id}:${jobId}` },
+        { deduplicationId: `battle-reingest-${battle.id}-${jobId}` },
       ).then((res) => ({ jobId, messageId: res.messageId })),
     ),
   )
