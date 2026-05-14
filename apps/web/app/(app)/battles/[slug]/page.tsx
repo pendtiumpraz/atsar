@@ -9,12 +9,17 @@
 
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 
+import { BattleAdminActions } from '@/components/battles/battle-admin-actions'
 import { BattleDetail, type BattleDetailData } from '@/components/battles/battle-detail'
 import type { BattleMapPhase } from '@/components/battles/battle-map'
 import type { ParticipantListItem } from '@/components/battles/participant-list'
+import type { BattleReingestCurrentSnapshot } from '@/components/admin/battles/battle-reingest-panel'
 import { ApiError } from '@/lib/server/api'
+import { auth } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 import { battleService } from '@/lib/server/services/battle.service'
 
 interface BattleDetailPageProps {
@@ -70,6 +75,14 @@ export default async function BattleDetailPage({
 
   if (!battle) notFound()
 
+  // Resolve admin flag for the "Perbarui via AI" / "Edit" header buttons.
+  // Cheap — session lookup is already cached for this request by (app)/layout.
+  const reqHeaders = await headers()
+  const session = await auth.api.getSession({ headers: reqHeaders })
+  const isAdmin = session?.user?.id
+    ? (await getUserRoleSlugs(session.user.id)).has('admin')
+    : false
+
   const phases = battle.phases ?? []
   const data = battle as unknown as BattleDetailData
   const latin = data.nameId || slug
@@ -77,6 +90,24 @@ export default async function BattleDetailPage({
   const date = formatYear(data.eventDateAh, data.eventDateCe)
 
   const backHref = buildBackHref(sp)
+
+  // Snapshot of the battle row used by the diff dialog's "Sekarang" column.
+  const reingestSnapshot: BattleReingestCurrentSnapshot = {
+    narrativeId: data.narrativeId ?? null,
+    narrativeAr: data.narrativeAr ?? null,
+    strategyId: data.strategyId ?? null,
+    strategyAr: data.strategyAr ?? null,
+    significanceId: data.significanceId ?? null,
+    significanceAr: data.significanceAr ?? null,
+    eventDateAh: data.eventDateAh ?? null,
+    eventDateCe: data.eventDateCe ?? null,
+    opponentForce: data.opponentForce ?? null,
+    muslimCount: data.muslimCount ?? null,
+    opponentCount: data.opponentCount ?? null,
+    outcome: data.outcome ?? null,
+    casualtiesMuslim: data.casualtiesMuslim ?? null,
+    casualtiesOpponent: data.casualtiesOpponent ?? null,
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -93,19 +124,26 @@ export default async function BattleDetailPage({
         </div>
 
         <div className="flex flex-col gap-1 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 sm:p-5">
-          {arabic ? (
-            <h1
-              lang="ar"
-              dir="rtl"
-              className="text-3xl font-semibold leading-tight text-[rgb(var(--text))] sm:text-4xl"
-              style={{ fontFamily: 'var(--font-display-arab)' }}
-            >
-              {arabic}
-            </h1>
-          ) : null}
-          <div className="text-lg font-medium text-[rgb(var(--text-muted))]">
-            {latin}
-            {date ? <span className="text-[rgb(var(--text-faint))]"> · {date}</span> : null}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {arabic ? (
+                <h1
+                  lang="ar"
+                  dir="rtl"
+                  className="text-3xl font-semibold leading-tight text-[rgb(var(--text))] sm:text-4xl"
+                  style={{ fontFamily: 'var(--font-display-arab)' }}
+                >
+                  {arabic}
+                </h1>
+              ) : null}
+              <div className="text-lg font-medium text-[rgb(var(--text-muted))]">
+                {latin}
+                {date ? <span className="text-[rgb(var(--text-faint))]"> · {date}</span> : null}
+              </div>
+            </div>
+            {isAdmin ? (
+              <BattleAdminActions slug={data.slug} current={reingestSnapshot} />
+            ) : null}
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[rgb(var(--text-muted))]">
@@ -145,6 +183,8 @@ export default async function BattleDetailPage({
         battle={data}
         phases={phases as unknown as BattleMapPhase[]}
         participants={participants as unknown as ParticipantListItem[]}
+        isAdmin={isAdmin}
+        reingestSnapshot={reingestSnapshot}
       />
     </div>
   )

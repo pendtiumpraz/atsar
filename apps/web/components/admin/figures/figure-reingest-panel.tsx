@@ -28,6 +28,7 @@
 'use client'
 
 import * as React from 'react'
+import dynamic from 'next/dynamic'
 import {
   AlertCircle,
   Check,
@@ -59,6 +60,23 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Textarea } from '@/components/ui/textarea'
 import { api, ApiClientError } from '@/lib/api/client'
+
+// Lazy-load the diff viewer so the heavy `react-diff-viewer-continued` chunk
+// only enters the bundle once the admin opens the side-by-side comparison.
+const DiffViewer = dynamic(
+  () => import('@/components/reviewer/diff-viewer').then((m) => m.DiffViewer),
+  { ssr: false },
+)
+
+/** Fields whose suggestion value is a long string — these get the
+ *  `react-diff-viewer-continued` line-level highlight in side-by-side mode.
+ *  Short / numeric / scalar fields just show plain text side by side. */
+const TEXT_DIFF_FIELDS = new Set([
+  'biographyId',
+  'biographyAr',
+  'summaryId',
+  'summaryAr',
+])
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -125,6 +143,18 @@ interface FocusFieldGroup {
   columns: (keyof FigureReingestCurrentSnapshot)[]
 }
 
+/** Expand group ids → flat list of DB column names the backend Zod
+ *  schema accepts. Sending group ids verbatim 422s because the API
+ *  enum is keyed by column. */
+function expandFocusGroups(groupIds: Iterable<string>): string[] {
+  const ids = new Set(groupIds)
+  const out = new Set<string>()
+  for (const group of FOCUS_FIELD_GROUPS) {
+    if (ids.has(group.id)) for (const c of group.columns) out.add(c)
+  }
+  return Array.from(out)
+}
+
 const FOCUS_FIELD_GROUPS: FocusFieldGroup[] = [
   { id: 'biography', label: 'Biografi', columns: ['biographyId', 'biographyAr'] },
   { id: 'summary', label: 'Ringkasan', columns: ['summaryId', 'summaryAr'] },
@@ -180,6 +210,13 @@ function previewValue(v: unknown): string {
   if (typeof v === 'object') return JSON.stringify(v).slice(0, 200)
   const s = String(v)
   return s.length > 240 ? `${s.slice(0, 240)}…` : s
+}
+
+function fullValue(v: unknown): string {
+  if (isEmpty(v)) return ''
+  if (Array.isArray(v)) return v.map(String).join('\n')
+  if (typeof v === 'object') return JSON.stringify(v, null, 2)
+  return String(v)
 }
 
 function formatRelative(iso: string | null | undefined): string {
@@ -247,6 +284,8 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
   /** Field keys the admin already accepted (or rejected) in this session, so
    *  the row hides its buttons + shows a state badge. */
   const [resolved, setResolved] = React.useState<Record<string, 'accepted' | 'rejected'>>({})
+  /** Toggle between compact table layout and side-by-side comparison cards. */
+  const [compareView, setCompareView] = React.useState<'table' | 'side'>('table')
 
   // History: last AI ingest job (independent of the current submission).
   const [recent, setRecent] = React.useState<JobRow | null>(null)
@@ -318,7 +357,7 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
     try {
       const body = {
         mode,
-        focusFields: Array.from(focus),
+        focusFields: expandFocusGroups(focus),
         ...(hints.trim().length > 0 ? { hints: hints.trim() } : {}),
       }
       const res = await api.post<{
@@ -429,7 +468,7 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
     try {
       await api.post(`/admin/figures/${encodeURIComponent(slug)}/re-ingest`, {
         mode,
-        focusFields: Array.from(focus),
+        focusFields: expandFocusGroups(focus),
         ...(hints.trim().length > 0 ? { hints: hints.trim() } : {}),
         retryJobId: job.id,
       })
@@ -689,7 +728,7 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
 
       {/* ── Diff dialog ────────────────────────────────────────── */}
       <Dialog open={diffOpen} onOpenChange={setDiffOpen}>
-        <DialogContent className="sm:max-w-3xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Saran AI</DialogTitle>
             <DialogDescription>
@@ -698,90 +737,202 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[60vh] overflow-auto rounded-md border border-[rgb(var(--border))]">
-            <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-[rgb(var(--bg-elevated))] text-xs uppercase text-[rgb(var(--text-muted))]">
-                <tr>
-                  <th className="px-3 py-2">Field</th>
-                  <th className="px-3 py-2">Sekarang</th>
-                  <th className="px-3 py-2">Saran AI</th>
-                  <th className="px-3 py-2 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {job?.suggestions && Object.keys(job.suggestions).length > 0 ? (
-                  Object.entries(job.suggestions).map(([key, suggested]) => {
-                    const label = FIELD_LABELS[key] ?? key
-                    const currentVal = (current as Record<string, unknown>)[key]
-                    const state = resolved[key]
-                    const applyable = key in FIELD_LABELS && key !== 'citations'
-                    return (
-                      <tr
-                        key={key}
-                        className="border-t border-[rgb(var(--border))] align-top"
-                      >
-                        <td className="px-3 py-2 font-medium">{label}</td>
-                        <td className="px-3 py-2 text-[rgb(var(--text-muted))]">
-                          <div className="max-w-[18rem] whitespace-pre-wrap break-words">
-                            {previewValue(currentVal)}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="max-w-[20rem] whitespace-pre-wrap break-words">
-                            {previewValue(suggested)}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          {state === 'accepted' ? (
-                            <span className="text-xs font-medium text-[rgb(var(--success,16_185_129))]">
-                              Diterima
-                            </span>
-                          ) : state === 'rejected' ? (
-                            <span className="text-xs text-[rgb(var(--text-muted))]">
-                              Ditolak
-                            </span>
-                          ) : (
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => acceptField(key, suggested)}
-                                disabled={!applyable}
-                                title={
-                                  applyable
-                                    ? 'Terapkan saran ini'
-                                    : 'Field ini perlu disunting manual'
-                                }
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                                Terima
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => rejectField(key)}
-                              >
-                                <X className="h-3.5 w-3.5" />
-                                Tolak
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-[rgb(var(--text-muted))]">
-                      Tidak ada saran perubahan.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="flex items-center justify-end pb-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setCompareView((v) => (v === 'table' ? 'side' : 'table'))
+              }
+            >
+              {compareView === 'table'
+                ? 'Tampilkan sebagai perbandingan'
+                : 'Tampilkan sebagai tabel'}
+            </Button>
           </div>
+
+          {compareView === 'table' ? (
+            <div className="max-h-[60vh] overflow-auto rounded-md border border-[rgb(var(--border))]">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-[rgb(var(--bg-elevated))] text-xs uppercase text-[rgb(var(--text-muted))]">
+                  <tr>
+                    <th className="px-3 py-2">Field</th>
+                    <th className="px-3 py-2">Sekarang</th>
+                    <th className="px-3 py-2">Saran AI</th>
+                    <th className="px-3 py-2 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {job?.suggestions && Object.keys(job.suggestions).length > 0 ? (
+                    Object.entries(job.suggestions).map(([key, suggested]) => {
+                      const label = FIELD_LABELS[key] ?? key
+                      const currentVal = (current as Record<string, unknown>)[key]
+                      const state = resolved[key]
+                      const applyable = key in FIELD_LABELS && key !== 'citations'
+                      return (
+                        <tr
+                          key={key}
+                          className="border-t border-[rgb(var(--border))] align-top"
+                        >
+                          <td className="px-3 py-2 font-medium">{label}</td>
+                          <td className="px-3 py-2 text-[rgb(var(--text-muted))]">
+                            <div className="max-w-[18rem] whitespace-pre-wrap break-words">
+                              {previewValue(currentVal)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="max-w-[20rem] whitespace-pre-wrap break-words">
+                              {previewValue(suggested)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            {state === 'accepted' ? (
+                              <span className="text-xs font-medium text-[rgb(var(--success,16_185_129))]">
+                                Diterima
+                              </span>
+                            ) : state === 'rejected' ? (
+                              <span className="text-xs text-[rgb(var(--text-muted))]">
+                                Ditolak
+                              </span>
+                            ) : (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => acceptField(key, suggested)}
+                                  disabled={!applyable}
+                                  title={
+                                    applyable
+                                      ? 'Terapkan saran ini'
+                                      : 'Field ini perlu disunting manual'
+                                  }
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Terima
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => rejectField(key)}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                  Tolak
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-[rgb(var(--text-muted))]">
+                        Tidak ada saran perubahan.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="flex max-h-[60vh] flex-col gap-4 overflow-auto pr-1">
+              {job?.suggestions && Object.keys(job.suggestions).length > 0 ? (
+                Object.entries(job.suggestions).map(([key, suggested]) => {
+                  const label = FIELD_LABELS[key] ?? key
+                  const currentVal = (current as Record<string, unknown>)[key]
+                  const state = resolved[key]
+                  const applyable = key in FIELD_LABELS && key !== 'citations'
+                  const useTextDiff = TEXT_DIFF_FIELDS.has(key)
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="text-sm font-semibold text-[rgb(var(--text))]">
+                          {label}
+                        </div>
+                        {state === 'accepted' ? (
+                          <span className="text-xs font-medium text-[rgb(var(--success,16_185_129))]">
+                            Diterima
+                          </span>
+                        ) : state === 'rejected' ? (
+                          <span className="text-xs text-[rgb(var(--text-muted))]">
+                            Ditolak
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {useTextDiff ? (
+                        <DiffViewer
+                          oldValue={fullValue(currentVal)}
+                          newValue={fullValue(suggested)}
+                          leftTitle="Sekarang"
+                          rightTitle="Saran AI"
+                          splitView
+                        />
+                      ) : (
+                        <div className="grid gap-3 lg:grid-cols-2">
+                          <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-3">
+                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[rgb(var(--text-faint))]">
+                              Sekarang
+                            </div>
+                            <div className="whitespace-pre-wrap break-words text-sm text-[rgb(var(--text-muted))]">
+                              {previewValue(currentVal)}
+                            </div>
+                          </div>
+                          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
+                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                              Saran AI
+                            </div>
+                            <div className="whitespace-pre-wrap break-words text-sm text-[rgb(var(--text))]">
+                              {previewValue(suggested)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {!state ? (
+                        <div className="mt-3 flex justify-end gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => acceptField(key, suggested)}
+                            disabled={!applyable}
+                            title={
+                              applyable
+                                ? 'Terapkan saran ini'
+                                : 'Field ini perlu disunting manual'
+                            }
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Terima
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => rejectField(key)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Tolak
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="rounded-md border border-[rgb(var(--border))] px-3 py-6 text-center text-sm text-[rgb(var(--text-muted))]">
+                  Tidak ada saran perubahan.
+                </div>
+              )}
+            </div>
+          )}
 
           <DialogFooter className="gap-2 sm:gap-2">
             <Button type="button" variant="ghost" onClick={rejectAll}>

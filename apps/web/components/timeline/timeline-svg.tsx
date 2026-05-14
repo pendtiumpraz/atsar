@@ -58,6 +58,15 @@ export interface TimelineSvgProps {
   linkable?: boolean
   /** Empty-state copy override. */
   emptyMessage?: string
+  /**
+   * Horizontal zoom level as a percent (100 = baseline width). The
+   * `viewBox` stays fixed so internal coordinates / geometry never
+   * change — we just stretch the rendered pixel width of the `<svg>`
+   * proportionally and rely on the existing `overflow-x-auto` wrapper
+   * to provide a horizontal scrollbar. Bars and labels scale together.
+   * Default 100.
+   */
+  zoom?: number
 }
 
 // ── Layout constants — mirror the landing spoiler ────────────────────
@@ -136,6 +145,7 @@ export function TimelineSvg({
   bands = [],
   linkable = true,
   emptyMessage,
+  zoom = 100,
 }: TimelineSvgProps) {
   const router = useRouter()
   const [hoverId, setHoverId] = useState<string | null>(null)
@@ -199,15 +209,34 @@ export function TimelineSvg({
   // Hijrah baseline (year 1 H, displayed as the "Hijrah" reference line)
   const showHijrahBaseline = minYear <= 1 && maxYear >= 1
 
+  // Resolve the rendered pixel width from the zoom prop. We keep the
+  // viewBox at SVG_WIDTH so every internal `x` coordinate, label
+  // anchor, and gutter math below is untouched — the browser handles
+  // the horizontal stretch. At zoom = 100 the SVG keeps its historical
+  // fluid `width: 100%` behaviour. Otherwise we set explicit pixel
+  // width *and* explicit pixel height (= viewBox height) together with
+  // `preserveAspectRatio="none"` so the SVG stretches horizontally
+  // only — vertical geometry stays untouched. The known tradeoff is
+  // that label text and bar widths stretch horizontally too; that's
+  // acceptable for a first cut.
+  const zoomPct = Math.max(50, Math.min(500, Math.round(zoom)))
+  const useFluid = zoomPct === 100
+  const svgPxWidth = Math.round(SVG_WIDTH * (zoomPct / 100))
+
   return (
     <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-2 sm:p-4">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" style={{ maxWidth: '100%' }}>
         <svg
           viewBox={`0 0 ${SVG_WIDTH} ${svgHeight}`}
           role="img"
           aria-label="Timeline komparasi tokoh"
-          className="h-auto w-full"
-          style={{ minWidth: '640px' }}
+          className={useFluid ? 'h-auto w-full' : 'block'}
+          style={
+            useFluid
+              ? { minWidth: '640px' }
+              : { width: `${svgPxWidth}px`, height: `${svgHeight}px`, minWidth: '640px' }
+          }
+          preserveAspectRatio={useFluid ? 'xMidYMid meet' : 'none'}
         >
           {/* Background bands (generation stripes etc.) */}
           {bands.map((b, i) => {

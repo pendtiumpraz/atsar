@@ -23,6 +23,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { figuresApi } from '@/lib/api/endpoints'
 
 import { TimelineSvg, type TimelineSvgFigure } from './timeline-svg'
+import { ZoomControl } from './zoom-control'
+
+/** localStorage key for the comparison-view zoom. */
+const ZOOM_STORAGE_KEY = 'athar.timeline.zoom'
 
 export interface ComparisonFigure {
   id: string
@@ -63,11 +67,47 @@ export function TimelineComparison({ figures }: TimelineComparisonProps) {
     [figures],
   )
 
+  // Zoom state (percent). Hydrated from localStorage post-mount so SSR
+  // and the first client render agree (avoids hydration mismatch).
+  const [zoom, setZoom] = useState<number>(100)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(ZOOM_STORAGE_KEY)
+      if (!raw) return
+      const parsed = Number(raw)
+      if (Number.isFinite(parsed) && parsed >= 50 && parsed <= 500) {
+        setZoom(Math.round(parsed))
+      }
+    } catch {
+      // localStorage may be unavailable (private mode, SSR replay) —
+      // safe to ignore, the in-memory default of 100 keeps working.
+    }
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom))
+    } catch {
+      // Same rationale as above.
+    }
+  }, [zoom])
+
+  const showZoom = rows.length > 0
+
   return (
-    <TimelineSvg
-      figures={rows}
-      emptyMessage="Belum ada tokoh terpilih, atau data tidak ditemukan. Coba pilih tokoh dari dropdown di atas."
-    />
+    <div className="flex flex-col gap-3">
+      {showZoom && (
+        <div className="flex justify-end">
+          <ZoomControl value={zoom} onChange={setZoom} />
+        </div>
+      )}
+      <TimelineSvg
+        figures={rows}
+        zoom={zoom}
+        emptyMessage="Belum ada tokoh terpilih, atau data tidak ditemukan. Coba pilih tokoh dari dropdown di atas."
+      />
+    </div>
   )
 }
 

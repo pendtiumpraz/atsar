@@ -14,12 +14,17 @@
 
 'use client'
 
+import * as React from 'react'
+import { Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 
 import { BattleMap, type BattleMapPhase } from '@/components/battles/battle-map'
+import { BattleReingestDialog } from '@/components/battles/battle-reingest-dialog'
 import { ParticipantList, type ParticipantListItem } from '@/components/battles/participant-list'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import type { BattleReingestCurrentSnapshot } from '@/components/admin/battles/battle-reingest-panel'
 
 export interface BattleDetailData {
   id: string
@@ -52,6 +57,12 @@ export interface BattleDetailProps {
   participants?: ParticipantListItem[]
   citations?: BattleCitation[]
   className?: string
+  /** Admin flag — when true, the Sumber tab renders a refresh button and the
+   *  "Data direfresh terakhir" status line. */
+  isAdmin?: boolean
+  /** Snapshot of the battle row used as the "Sekarang" column of the diff
+   *  dialog when an admin clicks "Perbarui sekarang" from the Sumber tab. */
+  reingestSnapshot?: BattleReingestCurrentSnapshot
 }
 
 export interface BattleCitation {
@@ -68,6 +79,8 @@ export function BattleDetail({
   participants = [],
   citations = [],
   className,
+  isAdmin = false,
+  reingestSnapshot,
 }: BattleDetailProps) {
   // Coordinates: prefer battle.latitude/longitude, then nested location row.
   const latitude = battle.latitude ?? battle.location?.latitude ?? null
@@ -106,7 +119,12 @@ export function BattleDetail({
       </TabsContent>
 
       <TabsContent value="sumber" className="mt-4">
-        <CitationsTab citations={citations} />
+        <CitationsTab
+          citations={citations}
+          slug={battle.slug}
+          isAdmin={isAdmin}
+          reingestSnapshot={reingestSnapshot}
+        />
       </TabsContent>
     </Tabs>
   )
@@ -217,42 +235,140 @@ function PhasesTab({ phases }: { phases: BattleMapPhase[] }) {
   )
 }
 
-function CitationsTab({ citations }: { citations: BattleCitation[] }) {
-  if (citations.length === 0) {
-    return (
+interface CitationsTabProps {
+  citations: BattleCitation[]
+  slug: string
+  isAdmin: boolean
+  reingestSnapshot?: BattleReingestCurrentSnapshot
+}
+
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return ''
+  const diff = Date.now() - then
+  if (diff < 60_000) return 'baru saja'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} menit lalu`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} jam lalu`
+  return `${Math.floor(diff / 86_400_000)} hari lalu`
+}
+
+function CitationsTab({
+  citations,
+  slug,
+  isAdmin,
+  reingestSnapshot,
+}: CitationsTabProps) {
+  const [reingestOpen, setReingestOpen] = React.useState(false)
+  const [lastRefreshedAt, setLastRefreshedAt] = React.useState<string | null>(null)
+
+  // Fetch the most recent re-ingest job to show "Data direfresh terakhir".
+  // Only runs for admins (the endpoint requires the right permission).
+  React.useEffect(() => {
+    if (!isAdmin) return
+    let cancelled = false
+    async function load() {
+      try {
+        const raw = await api.get<unknown>(
+          `/admin/battles/${encodeURIComponent(slug)}/re-ingest-jobs`,
+        )
+        if (cancelled) return
+        const list = Array.isArray(raw)
+          ? raw
+          : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>)['rows'])
+            ? ((raw as Record<string, unknown>)['rows'] as unknown[])
+            : null
+        if (list && list.length > 0) {
+          const first = list[0] as Record<string, unknown>
+          const finished =
+            (first['finishedAt'] as string | null | undefined) ??
+            (first['createdAt'] as string | null | undefined) ??
+            null
+          setLastRefreshedAt(finished ?? null)
+        }
+      } catch {
+        // 404 is expected on battles that have never been re-ingested.
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [isAdmin, slug])
+
+  const adminBar = isAdmin ? (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] px-3 py-2 text-xs">
+      <div className="text-[rgb(var(--text-muted))]">
+        {lastRefreshedAt ? (
+          <>
+            Data direfresh terakhir oleh AI:{' '}
+            <span className="font-medium text-[rgb(var(--text))]">
+              {formatRelative(lastRefreshedAt)}
+            </span>
+          </>
+        ) : (
+          'Pertempuran ini belum pernah direfresh oleh AI.'
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => setReingestOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-2.5 py-1 text-xs font-medium text-[rgb(var(--text))] hover:border-[rgb(var(--accent))]"
+      >
+        <Sparkles className="h-3.5 w-3.5" aria-hidden />
+        Perbarui sekarang
+      </button>
+    </div>
+  ) : null
+
+  const body =
+    citations.length === 0 ? (
       <TabPlaceholder
         title="Sumber"
         body="Daftar citation untuk pertempuran ini akan tampil di sini setelah modul Sumber tersedia."
       />
+    ) : (
+      <ul className="flex flex-col gap-2">
+        {citations.map((c, idx) => (
+          <li
+            key={c.id ?? idx}
+            className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 text-sm"
+          >
+            <div className="font-medium text-[rgb(var(--text))]">{c.title || 'Tanpa judul'}</div>
+            {c.author ? (
+              <div className="text-xs text-[rgb(var(--text-muted))]">{c.author}</div>
+            ) : null}
+            {c.excerpt ? (
+              <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">{c.excerpt}</p>
+            ) : null}
+            {c.url ? (
+              <a
+                href={c.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-block text-xs text-[rgb(var(--accent))] underline"
+              >
+                Buka sumber →
+              </a>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     )
-  }
+
   return (
-    <ul className="flex flex-col gap-2">
-      {citations.map((c, idx) => (
-        <li
-          key={c.id ?? idx}
-          className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-3 text-sm"
-        >
-          <div className="font-medium text-[rgb(var(--text))]">{c.title || 'Tanpa judul'}</div>
-          {c.author ? (
-            <div className="text-xs text-[rgb(var(--text-muted))]">{c.author}</div>
-          ) : null}
-          {c.excerpt ? (
-            <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">{c.excerpt}</p>
-          ) : null}
-          {c.url ? (
-            <a
-              href={c.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 inline-block text-xs text-[rgb(var(--accent))] underline"
-            >
-              Buka sumber →
-            </a>
-          ) : null}
-        </li>
-      ))}
-    </ul>
+    <div>
+      {adminBar}
+      {body}
+      {isAdmin ? (
+        <BattleReingestDialog
+          open={reingestOpen}
+          onOpenChange={setReingestOpen}
+          slug={slug}
+          current={reingestSnapshot}
+        />
+      ) : null}
+    </div>
   )
 }
 

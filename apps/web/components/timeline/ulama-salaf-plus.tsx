@@ -23,11 +23,15 @@
 
 import type { CalendarMode } from '@athar/shared'
 import { useQueries } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { figuresApi } from '@/lib/api/endpoints'
 
 import { TimelineSvg, type TimelineSvgBand, type TimelineSvgFigure } from './timeline-svg'
+import { ZoomControl } from './zoom-control'
+
+/** localStorage key for the ulama-view zoom. */
+const ZOOM_STORAGE_KEY = 'athar.timeline-ulama.zoom'
 
 type UlamaFigure = {
   id: string
@@ -80,6 +84,31 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
   const [spesialisasi, setSpesialisasi] = useState<string>('')
   const [madhab, setMadhab] = useState<string>('')
   const [showAll, setShowAll] = useState(false)
+
+  // Zoom state (percent). Hydrated from localStorage post-mount to keep
+  // SSR + first client render identical and avoid hydration warnings.
+  const [zoom, setZoom] = useState<number>(100)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = window.localStorage.getItem(ZOOM_STORAGE_KEY)
+      if (!raw) return
+      const parsed = Number(raw)
+      if (Number.isFinite(parsed) && parsed >= 50 && parsed <= 500) {
+        setZoom(Math.round(parsed))
+      }
+    } catch {
+      // localStorage unavailable — fall back to in-memory default.
+    }
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom))
+    } catch {
+      // Same rationale as above.
+    }
+  }, [zoom])
 
   const queries = useQueries({
     queries: GENERATION_GROUPS.map((g) => ({
@@ -189,7 +218,12 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
         </div>
       ) : (
         <>
-          <TimelineSvg figures={svgFigures} bands={BANDS} />
+          {svgFigures.length > 0 && (
+            <div className="flex justify-end">
+              <ZoomControl value={zoom} onChange={setZoom} />
+            </div>
+          )}
+          <TimelineSvg figures={svgFigures} bands={BANDS} zoom={zoom} />
           {truncated && (
             <div className="flex justify-center">
               <button
