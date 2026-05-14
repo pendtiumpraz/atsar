@@ -48,6 +48,25 @@ const FigureExtractionSchema = z.object({
   biographyAr: z.string().nullable(),
   biographyId: z.string().nullable(),
   /**
+   * Ancestral lineage ("nasab") — ordered child → parent → grandparent → …
+   * Each entry is one generation up. Only emit when the source explicitly
+   * states the chain (e.g. Sirah Ibn Hisham, biographical encyclopaedias);
+   * leave empty otherwise. Per the anti-hallucination contract, never
+   * guess names. The worker inserts these as `figure_relations` rows after
+   * creating the figure row.
+   */
+  nasabChain: z
+    .array(
+      z.object({
+        nameId: z.string(),
+        nameAr: z.string().nullable(),
+        kunyahId: z.string().nullable(),
+        kunyahAr: z.string().nullable(),
+        laqabId: z.string().nullable(),
+      }),
+    )
+    .default([]),
+  /**
    * Per-field citations. Each entry says "for `fieldPath`, the fact came
    * from `sourceUrl` and the original snippet was `excerpt`". The
    * orchestrator turns these into rows in `citations`.
@@ -74,8 +93,10 @@ export interface ExtractionSource {
 }
 
 export interface ExtractFigureDataResult {
-  figureData: Omit<FigureExtractionResult, 'citations'>
+  figureData: Omit<FigureExtractionResult, 'citations' | 'nasabChain'>
   citations: FigureExtractionResult['citations']
+  /** Optional ancestral lineage extracted from sources. */
+  nasabChain: FigureExtractionResult['nasabChain']
   /** ModelId used (e.g. `deepseek-chat`), so callers can persist `model_used`. */
   modelUsed: string
 }
@@ -94,6 +115,11 @@ const SYSTEM_PROMPT = [
   '   transliteration (e.g. "أبو بكر الصديق" → "Abu Bakr ash-Shiddiq"). Do not paraphrase.',
   '5. `biographyAr` / `biographyId`: keep concise (2-4 paragraphs), grounded in sources.',
   '6. If sources conflict, prefer the higher-priority source; do NOT invent a synthesis.',
+  '7. `nasabChain`: when sources EXPLICITLY list the ancestral lineage (Sirah Ibn',
+  '   Hisham, biographical dictionaries, etc.), emit one entry per generation',
+  '   ordered child → parent → grandparent → …  Each entry is ONE link in the',
+  '   chain. Names: `nameId` Indonesian transliteration, `nameAr` original Arabic.',
+  '   If the source does not list the chain, leave `nasabChain` as an empty array.',
   '',
   'If the sources are empty, irrelevant, or about a different person, return every field as null',
   'with an empty citations array. Returning null is always preferable to guessing.',
@@ -131,6 +157,7 @@ export async function extractFigureData(
     return {
       figureData: emptyFigureData(),
       citations: [],
+      nasabChain: [],
       modelUsed: 'none',
     }
   }
@@ -147,15 +174,16 @@ export async function extractFigureData(
     temperature: 0.1,
   })
 
-  const { citations, ...figureData } = object
+  const { citations, nasabChain, ...figureData } = object
   return {
     figureData,
     citations,
+    nasabChain,
     modelUsed: active.model.modelId,
   }
 }
 
-function emptyFigureData(): Omit<FigureExtractionResult, 'citations'> {
+function emptyFigureData(): Omit<FigureExtractionResult, 'citations' | 'nasabChain'> {
   return {
     nameFullAr: null,
     nameFullId: null,

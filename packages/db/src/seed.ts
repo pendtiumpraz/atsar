@@ -37,6 +37,8 @@ import { seed025UlamaPascaSalaf } from './seeders/025_ulama_pasca_salaf.js'
 import { seed026Ghazwah } from './seeders/026_ghazwah.js'
 import { seed027Relations } from './seeders/027_relations.js'
 import { seed028DevUsers } from './seeders/028_dev_users.js'
+import { seed029Nasab } from './seeders/029_nasab.js'
+import { seed030RelationPaths } from './seeders/030_relation_paths.js'
 
 async function main() {
   const isDev = process.argv.includes('--dev')
@@ -83,6 +85,16 @@ async function main() {
 
     // Relations last — references figures, locations, and battles.
     await seed027Relations()
+
+    // Nasab (ancestral lineage) — extends figure_relations with the
+    // classical chains for Nabi ﷺ, Abu Bakr, Umar, Ali, and inheritors.
+    // Adds pre-Islamic ancestors as `shalih_pre_rasul` figures.
+    await seed029Nasab()
+
+    // Relation-checker cache: pre-compute a small handful of famous
+    // figure pairs so the FE renders meaningful "Cek Hubungan" results
+    // on day one without burning AI credits.
+    await seed030RelationPaths()
 
     // Dev-only sample users (admin / reviewer / subscriber).
     if (isDev) {
