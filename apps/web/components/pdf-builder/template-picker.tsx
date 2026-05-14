@@ -20,27 +20,31 @@ export interface TemplateOption {
 const TEMPLATES: TemplateOption[] = [
   {
     slug: 'classic',
-    label: 'Klasik',
-    description: 'Layout tradisional dengan ornamen Turats hijau zamrud.',
-    swatch: 'from-[#0e5c4a] to-[#063b30]',
+    label: 'Klasik Naskh',
+    description:
+      'Kertas krem hangat, Amiri + EB Garamond, ornamen bab klasik, catatan kaki.',
+    swatch: 'from-[#FAF5EB] to-[#E8DFC8]',
   },
   {
     slug: 'modern',
-    label: 'Modern',
-    description: 'Tipografi tegas, banyak ruang putih, cocok dibaca digital.',
-    swatch: 'from-slate-100 to-slate-300',
+    label: 'Kontemporer',
+    description:
+      'Putih bersih, Markazi + Inter, grid editorial, sidebar tanggal.',
+    swatch: 'from-slate-50 to-slate-200',
   },
   {
     slug: 'calligraphy',
-    label: 'Kaligrafi',
-    description: 'Cover berhias kaligrafi Arab, ideal untuk hadiah.',
-    swatch: 'from-amber-100 to-amber-300',
+    label: 'Lentera Premium',
+    description:
+      'Navy tua + emas, Aref Ruqaa display, drop cap besar — edisi hadiah.',
+    swatch: 'from-[#1A2E48] to-[#08111B]',
   },
   {
     slug: 'minimalist',
-    label: 'Minimalis',
-    description: 'Tanpa ornamen, fokus pada teks.',
-    swatch: 'from-stone-200 to-stone-400',
+    label: 'Edisi Mahasiswa',
+    description:
+      'Off-white seperti buku catatan, margin lebar untuk anotasi, kotak definisi.',
+    swatch: 'from-[#FDFCF8] to-[#F2EBD9]',
   },
 ]
 

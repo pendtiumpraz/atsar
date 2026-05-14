@@ -17,6 +17,7 @@ import { z } from 'zod'
 
 import { db } from '@athar/db'
 import {
+  citations,
   figures,
   figureLocations,
   figureRelations,
@@ -100,30 +101,43 @@ export const POST = withSignature(async (req) => {
       throw new Error('Job has no figureIds')
     }
 
-    const [figureRows, relationRows, locationRows] = await Promise.all([
-      db
-        .select()
-        .from(figures)
-        .where(and(inArray(figures.id, figureIds), isNull(figures.deletedAt))),
-      db
-        .select()
-        .from(figureRelations)
-        .where(
-          and(
-            inArray(figureRelations.figureId, figureIds),
-            isNull(figureRelations.deletedAt),
+    const [figureRows, relationRows, locationRows, citationRows] =
+      await Promise.all([
+        db
+          .select()
+          .from(figures)
+          .where(and(inArray(figures.id, figureIds), isNull(figures.deletedAt))),
+        db
+          .select()
+          .from(figureRelations)
+          .where(
+            and(
+              inArray(figureRelations.figureId, figureIds),
+              isNull(figureRelations.deletedAt),
+            ),
           ),
-        ),
-      db
-        .select()
-        .from(figureLocations)
-        .where(
-          and(
-            inArray(figureLocations.figureId, figureIds),
-            isNull(figureLocations.deletedAt),
+        db
+          .select()
+          .from(figureLocations)
+          .where(
+            and(
+              inArray(figureLocations.figureId, figureIds),
+              isNull(figureLocations.deletedAt),
+            ),
           ),
-        ),
-    ])
+        // Citations are joined by (contentType, contentId) — the table
+        // is polymorphic so we filter to `figure` rows in the WHERE.
+        db
+          .select()
+          .from(citations)
+          .where(
+            and(
+              eq(citations.contentType, 'figure'),
+              inArray(citations.contentId, figureIds),
+              isNull(citations.deletedAt),
+            ),
+          ),
+      ])
 
     // Group child rows by figureId, then preserve the input order so the
     // book follows the user's selection sequence (not DB row order).
@@ -139,6 +153,12 @@ export const POST = withSignature(async (req) => {
       arr.push(l)
       locsByFigure.set(l.figureId, arr)
     }
+    const citesByFigure = new Map<string, typeof citationRows>()
+    for (const c of citationRows) {
+      const arr = citesByFigure.get(c.contentId) ?? []
+      arr.push(c)
+      citesByFigure.set(c.contentId, arr)
+    }
     const figureById = new Map(figureRows.map((f) => [f.id, f]))
 
     const rich: FigureRich[] = []
@@ -149,6 +169,7 @@ export const POST = withSignature(async (req) => {
         ...f,
         relations: relsByFigure.get(id) ?? [],
         locations: locsByFigure.get(id) ?? [],
+        citations: citesByFigure.get(id) ?? [],
       })
     }
 

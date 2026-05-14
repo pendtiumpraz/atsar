@@ -18,12 +18,18 @@ export {
   getTemplate,
   listTemplateSlugs,
   escapeHtml,
+  escapeCssString,
   fontImports,
   paletteCss,
   renderFigurePage,
   renderTimeline,
   renderMapPlaceholder,
   watermark,
+  islamicStarPattern,
+  chapterOrnamentSvg,
+  cornerArabesqueSvg,
+  hijriYearApprox,
+  dualYearStamp,
 } from './templates/index.js'
 export type {
   FigureRich,
