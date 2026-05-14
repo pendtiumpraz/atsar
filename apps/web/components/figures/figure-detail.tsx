@@ -9,16 +9,21 @@
 // All six tabs render real data sourced from the enriched `getBySlug`
 // payload (see `figureService.getBySlug`). Each tab has a meaningful
 // empty state — never the words "Coming Soon".
+//
+// The header has been promoted into `<FigureHero />` which carries the
+// arabesque background, big bilingual name, honorific/category chips,
+// quick-stat grid, reading-time, share link, and admin "Perbarui via
+// AI" CTA. This component now just hosts the hero + tabs.
 
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
 
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { figuresApi } from '@/lib/api/endpoints'
 import { cn } from '@/lib/utils'
 
+import { FigureHero } from './figure-hero'
 import { FigureBiografiTab } from './tabs/figure-biografi-tab'
 import { FigureTimelineTab } from './tabs/figure-timeline-tab'
 import { FigurePetaTab } from './tabs/figure-peta-tab'
@@ -155,9 +160,11 @@ export interface FigureDetailProps {
   slug: string
   /** Optional SSR-fetched data to hydrate from. */
   initialData?: FigureDetailData
+  /** Whether the viewer is an admin — drives the hero/sumber CTAs. */
+  isAdmin?: boolean
 }
 
-export function FigureDetail({ slug, initialData }: FigureDetailProps) {
+export function FigureDetail({ slug, initialData, isAdmin = false }: FigureDetailProps) {
   const { data, isPending, isError, error } = useQuery<FigureDetailData>({
     queryKey: ['figure', slug],
     queryFn: () => figuresApi.getBySlug(slug) as Promise<FigureDetailData>,
@@ -181,93 +188,47 @@ export function FigureDetail({ slug, initialData }: FigureDetailProps) {
     )
   }
 
-  const latinName = data.nameFullId || data.nameShortId || data.slug
-  const arabicName = data.nameFullAr || data.nameShortAr
-  const categoryLabel = data.category?.nameId || data.category?.slug
-
   return (
-    <article className="flex flex-col gap-4 rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 sm:p-6">
-      {/* Header */}
-      <header className="flex flex-col gap-2">
-        {arabicName ? (
-          <h1
-            lang="ar"
-            dir="rtl"
-            className="text-3xl font-semibold leading-tight text-[rgb(var(--text))] sm:text-4xl"
-            style={{ fontFamily: 'var(--font-display-arab)' }}
-          >
-            {arabicName}
-          </h1>
-        ) : null}
-        <div className="text-lg font-medium text-[rgb(var(--text-muted))]">
-          {latinName}
-          {data.gender === 'female' ? ' (RA)' : data.gender === 'male' ? ' (RA)' : ''}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[rgb(var(--text-muted))]">
-          {categoryLabel ? <Badge variant="secondary">{categoryLabel}</Badge> : null}
-          {data.kunyahAr || data.kunyahId ? (
-            <span>
-              Kunyah:{' '}
-              <span className="font-medium text-[rgb(var(--text))]">
-                {data.kunyahId || data.kunyahAr}
-              </span>
-            </span>
-          ) : null}
-          {typeof data.birthDateAh === 'number' || typeof data.birthDateCe === 'number' ? (
-            <span>
-              Lahir:{' '}
-              <span className="font-medium text-[rgb(var(--text))]">
-                {formatYear(data.birthDateAh, data.birthDateCe)}
-              </span>
-            </span>
-          ) : null}
-          {typeof data.deathDateAh === 'number' || typeof data.deathDateCe === 'number' ? (
-            <span>
-              Wafat:{' '}
-              <span className="font-medium text-[rgb(var(--text))]">
-                {formatYear(data.deathDateAh, data.deathDateCe)}
-              </span>
-            </span>
-          ) : null}
-        </div>
-      </header>
+    <article className="flex flex-col gap-4">
+      <FigureHero data={data} isAdmin={isAdmin} />
 
       {/* Tabs */}
-      <Tabs defaultValue="biografi" className="w-full">
-        <TabsList className="flex w-full flex-wrap justify-start gap-1 overflow-x-auto">
-          <TabsTrigger value="biografi">Biografi</TabsTrigger>
-          <TabsTrigger value="timeline">Timeline</TabsTrigger>
-          <TabsTrigger value="peta">Peta</TabsTrigger>
-          <TabsTrigger value="hubungan">Hubungan</TabsTrigger>
-          <TabsTrigger value="hadits">Hadits</TabsTrigger>
-          <TabsTrigger value="sumber">Sumber</TabsTrigger>
-        </TabsList>
+      <div className="rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-4 sm:p-6">
+        <Tabs defaultValue="biografi" className="w-full">
+          <TabsList className="flex w-full flex-wrap justify-start gap-1 overflow-x-auto">
+            <TabsTrigger value="biografi">Biografi</TabsTrigger>
+            <TabsTrigger value="timeline">Timeline</TabsTrigger>
+            <TabsTrigger value="peta">Peta</TabsTrigger>
+            <TabsTrigger value="hubungan">Hubungan</TabsTrigger>
+            <TabsTrigger value="hadits">Hadits</TabsTrigger>
+            <TabsTrigger value="sumber">Sumber</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="biografi" className="mt-4">
-          <FigureBiografiTab data={data} />
-        </TabsContent>
+          <TabsContent value="biografi" className="mt-4">
+            <FigureBiografiTab data={data} isAdmin={isAdmin} />
+          </TabsContent>
 
-        <TabsContent value="timeline" className="mt-4">
-          <FigureTimelineTab data={data} />
-        </TabsContent>
+          <TabsContent value="timeline" className="mt-4">
+            <FigureTimelineTab data={data} />
+          </TabsContent>
 
-        <TabsContent value="peta" className="mt-4">
-          <FigurePetaTab data={data} />
-        </TabsContent>
+          <TabsContent value="peta" className="mt-4">
+            <FigurePetaTab data={data} />
+          </TabsContent>
 
-        <TabsContent value="hubungan" className="mt-4">
-          <FigureHubunganTab data={data} />
-        </TabsContent>
+          <TabsContent value="hubungan" className="mt-4">
+            <FigureHubunganTab data={data} />
+          </TabsContent>
 
-        <TabsContent value="hadits" className="mt-4">
-          <FigureHaditsTab data={data} />
-        </TabsContent>
+          <TabsContent value="hadits" className="mt-4">
+            <FigureHaditsTab data={data} />
+          </TabsContent>
 
-        <TabsContent value="sumber" className="mt-4">
-          <FigureSumberTab data={data} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="sumber" className="mt-4">
+            <FigureSumberTab data={data} isAdmin={isAdmin} />
+          </TabsContent>
+        </Tabs>
+      </div>
     </article>
   )
 }
@@ -286,11 +247,4 @@ function FigureDetailSkeleton() {
       <div className="mt-2 h-24 w-full rounded bg-[rgb(var(--bg-elevated))]" />
     </div>
   )
-}
-
-function formatYear(ah: number | null | undefined, ce: number | null | undefined): string {
-  const parts: string[] = []
-  if (typeof ah === 'number') parts.push(`${ah} H`)
-  if (typeof ce === 'number') parts.push(`${ce} M`)
-  return parts.join(' / ') || '—'
 }

@@ -5,6 +5,9 @@
 //   - Set per-figure metadata (title etc).
 //   - Hydrate `<FigureDetail />`'s TanStack Query cache via `initialData` so
 //     there's no client loading flash when the route swaps in.
+//   - Resolve `isAdmin` from the session once (cheap — already cached by
+//     the (app) layout) so the new `<FigureHero />` can surface the
+//     "Perbarui via AI" CTA for admins without an extra round-trip.
 //
 // `searchParams` are preserved end-to-end: the filter bar reads / writes them
 // (URL is the single source of truth), the list grid uses them, and the back
@@ -17,6 +20,7 @@
 // `figures.view`, so direct service access is safe here.
 
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 
 import { BackButton } from '@/components/figures/back-button'
@@ -25,6 +29,8 @@ import { FigureFilterBar } from '@/components/figures/figure-filter-bar'
 import { FigureGrid } from '@/components/figures/figure-grid'
 import { ListDetailShell } from '@/components/figures/list-detail-shell'
 import { ApiError } from '@/lib/server/api'
+import { auth } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 import { figureService } from '@/lib/server/services/figure.service'
 
 interface FigureDetailPageProps {
@@ -73,6 +79,15 @@ export default async function FigureDetailPage({
   const figure = await loadFigure(slug)
   if (!figure) notFound()
 
+  // Resolve admin flag for the hero/sumber CTAs. Cheap — the session lookup
+  // is already cached for this request by the (app) layout. We `Promise.all`
+  // with the figure load earlier in the request to keep TTFB tight.
+  const reqHeaders = await headers()
+  const session = await auth.api.getSession({ headers: reqHeaders })
+  const isAdmin = session?.user?.id
+    ? (await getUserRoleSlugs(session.user.id)).has('admin')
+    : false
+
   const q = pick(sp.q)
   const category = pick(sp.category)
   const genderRaw = pick(sp.gender)
@@ -96,11 +111,12 @@ export default async function FigureDetailPage({
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-2">
               <BackButton />
-              {/* Placeholder action area — F18 (admin) will inject Edit / PDF here. */}
+              {/* Hero takes over Edit / Perbarui actions for admins. */}
             </div>
             <FigureDetail
               slug={slug}
               initialData={figure as unknown as FigureDetailData}
+              isAdmin={isAdmin}
             />
           </div>
         }

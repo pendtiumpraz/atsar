@@ -8,6 +8,11 @@ export { MessageList } from './message-list'
 export { MessageInput } from './message-input'
 export { ConversationHistory } from './conversation-history'
 export { CitationLink } from './citation-link'
+export {
+  PromptGuideDialog,
+  PROMPT_GUIDE_DISMISSED_KEY,
+} from './prompt-guide-dialog'
+export type { PromptGuideDialogProps } from './prompt-guide-dialog'
 export type {
   StoredConversation,
   StoredMessage,
