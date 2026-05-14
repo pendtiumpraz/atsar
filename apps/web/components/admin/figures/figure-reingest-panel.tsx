@@ -189,9 +189,12 @@ const FIELD_LABELS: Record<string, string> = {
   birthDateCe: 'Lahir (M)',
   deathDateAh: 'Wafat (H)',
   deathDateCe: 'Wafat (M)',
+  socialCategory: 'Kategori sosial',
   specialty: 'Spesialisasi',
   madhab: 'Madhab',
   rijalGrade: 'Rijal grade',
+  nameFullId: 'Nama lengkap (ID)',
+  nameFullAr: 'Nama lengkap (AR)',
   citations: 'Citation',
 }
 
