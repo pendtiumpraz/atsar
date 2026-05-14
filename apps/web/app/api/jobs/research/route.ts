@@ -846,6 +846,11 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   // table's inferred-insert type to keep type safety end-to-end.
   type FigureUpdate = Partial<typeof figures.$inferInsert>
   const patch: FigureUpdate = {}
+  // `suggestions` mirrors `patch` but typed as a JSON record so the
+  // admin re-ingest UI can render diff rows (current vs proposed) and
+  // "Tolak" can rollback using `previous`.
+  const suggestions: Record<string, unknown> = {}
+  const previous: Record<string, unknown> = {}
 
   for (const field of MERGEABLE_FIELDS) {
     const aiValue = figureData[field as keyof typeof figureData] as unknown
@@ -863,6 +868,8 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     // `FigureExtractionSchema` (extract.ts) was built from the same schema.
     ;(patch as Record<string, unknown>)[field] = aiValue
     fieldsChanged.push(field)
+    suggestions[field] = aiValue
+    previous[field] = currentValue
   }
 
   // 8. UPDATE the figure row only if we actually have something to change.
@@ -903,8 +910,11 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     insertedCitationCount = inserted.length
   }
 
-  // 10. Mark the job complete. The `metadata.fieldsChanged` blob lets the
-  //     admin UI highlight what the refresh actually mutated.
+  // 10. Mark the job complete. We stash three blobs in payload so the
+  //     re-ingest diff dialog can render properly:
+  //       - fieldsChanged: array of field names that were mutated.
+  //       - suggestions: { field → AI-applied value } (for "Tinjau diff").
+  //       - previous: { field → pre-refresh value } (for "Tolak / revert").
   const updatedPayload = {
     ...(payload as Record<string, unknown>),
     metadata: {
@@ -914,6 +924,8 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
       citationsInserted: insertedCitationCount,
       modelUsed,
     },
+    suggestions,
+    previous,
   }
   await db
     .update(researchJobs)

@@ -238,9 +238,18 @@ function normaliseJob(raw: unknown): JobRow | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   const status = (r['status'] as JobStatus) ?? 'pending'
-  // Some backends nest suggestions under `result.suggestions` — accept both.
+  // Suggestions can live in three places depending on which endpoint
+  // shape we're consuming. Newest worker (research/route.ts) stashes
+  // them under `payload.suggestions` alongside `payload.previous` so
+  // the diff dialog can render current vs proposed AND support rollback.
   let suggestions: Record<string, unknown> | null = null
-  if (r['suggestions'] && typeof r['suggestions'] === 'object') {
+  const payloadObj =
+    r['payload'] && typeof r['payload'] === 'object'
+      ? (r['payload'] as Record<string, unknown>)
+      : null
+  if (payloadObj && payloadObj['suggestions'] && typeof payloadObj['suggestions'] === 'object') {
+    suggestions = payloadObj['suggestions'] as Record<string, unknown>
+  } else if (r['suggestions'] && typeof r['suggestions'] === 'object') {
     suggestions = r['suggestions'] as Record<string, unknown>
   } else if (
     r['result'] &&
