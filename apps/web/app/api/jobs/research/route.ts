@@ -129,6 +129,48 @@ type FallbackTierResult =
   | { kind: 'failure'; failure: RunResearchFailure }
   | { kind: 'no_match' }
 
+/**
+ * Does this figure-extraction look substantive enough to keep, or should we
+ * fall back to DDG? "Substantive" = at least one of the rich narrative
+ * fields OR multiple non-name fields populated. AI echoing the input name
+ * back while writing null everywhere else is NOT substantive — that's the
+ * failure mode we saw on Abbas bin Abdul Muthalib (5 source pages were
+ * whitelist on-site search-result pages → AI correctly refused to invent
+ * biography → output was "name + nothing"). We treat that as a miss so
+ * the DDG ladder kicks in.
+ */
+function extractionLooksSubstantive(
+  data: Awaited<ReturnType<typeof extractFigureData>>['figureData'],
+): boolean {
+  // Reject extractions with no name at all — sources were irrelevant.
+  if (!data.nameFullAr && !data.nameFullId) return false
+  // Strong signal: any long-form narrative field has content.
+  if (
+    (data.biographyAr && data.biographyAr.trim().length > 80) ||
+    (data.biographyId && data.biographyId.trim().length > 80) ||
+    (data.biographyPreWafatId && data.biographyPreWafatId.trim().length > 40) ||
+    (data.biographyPostWafatId && data.biographyPostWafatId.trim().length > 40) ||
+    (data.summaryId && data.summaryId.trim().length > 40) ||
+    (data.summaryAr && data.summaryAr.trim().length > 40)
+  ) {
+    return true
+  }
+  // Weaker signal: count populated non-name fields. >= 3 means AI found
+  // SOMETHING (dates, specialty, kunyah, madhab, etc.) — accept.
+  let populated = 0
+  if (data.birthDateAh || data.birthDateCe) populated++
+  if (data.deathDateAh || data.deathDateCe) populated++
+  if (data.kunyahAr || data.kunyahId) populated++
+  if (data.laqabAr || data.laqabId) populated++
+  if (data.madhab) populated++
+  if (data.rijalGrade && data.rijalGrade !== 'unverified') populated++
+  if (data.specialty && data.specialty.length > 0) populated++
+  if (data.socialCategory && data.socialCategory.length > 0) populated++
+  if (data.hadithCountMin || data.hadithCountMax) populated++
+  if (data.deathCause) populated++
+  return populated >= 3
+}
+
 async function tryFallbackTier(
   name: string,
   urls: string[],
@@ -143,10 +185,10 @@ async function tryFallbackTier(
   const attempt = await tryExtractFigure(name, fetch.fetched, hints, log)
   if (!attempt) return { kind: 'no_match' }
   if ('failure' in attempt) return { kind: 'failure', failure: attempt.failure }
-  if (
-    attempt.result.figureData.nameFullAr ||
-    attempt.result.figureData.nameFullId
-  ) {
+  // Same substantive check as the initial pass — don't accept a "name only"
+  // extraction from the fallback tier either, or we'd just be passing the
+  // same junk through.
+  if (extractionLooksSubstantive(attempt.result.figureData)) {
     return { kind: 'accepted', fetched: fetch.fetched, attempt }
   }
   return { kind: 'no_match' }
@@ -203,6 +245,39 @@ async function tryExtractBattle(
   }
 }
 
+/** Battle analogue of `extractionLooksSubstantive`. Same logic: require
+ *  either a real narrative or several non-name fields populated, so that
+ *  "AI echoed input battle name + null everything else" triggers fallback
+ *  instead of silently completing as a no-op. */
+function battleExtractionLooksSubstantive(
+  data: Awaited<ReturnType<typeof extractBattleData>>['battleData'],
+): boolean {
+  const nameAr = data.nameAr?.trim() ?? ''
+  const nameId = data.nameId?.trim() ?? ''
+  if (nameAr.length === 0 && nameId.length === 0) return false
+  if (
+    (data.narrativeId && data.narrativeId.trim().length > 120) ||
+    (data.narrativeAr && data.narrativeAr.trim().length > 120) ||
+    (data.strategyId && data.strategyId.trim().length > 80) ||
+    (data.strategyAr && data.strategyAr.trim().length > 80) ||
+    (data.significanceId && data.significanceId.trim().length > 60) ||
+    (data.significanceAr && data.significanceAr.trim().length > 60)
+  ) {
+    return true
+  }
+  let populated = 0
+  if (data.eventDateAh || data.eventDateCe) populated++
+  if (data.commanderName) populated++
+  if (data.locationSlug) populated++
+  if (data.opponentForce) populated++
+  if (data.muslimCount || data.opponentCount) populated++
+  if (data.casualtiesMuslim || data.casualtiesOpponent) populated++
+  if (data.outcome) populated++
+  if (data.participants && data.participants.length > 0) populated++
+  if (data.phases && data.phases.length > 0) populated++
+  return populated >= 3
+}
+
 async function tryFallbackTierBattle(
   name: string,
   urls: string[],
@@ -217,11 +292,7 @@ async function tryFallbackTierBattle(
   const attempt = await tryExtractBattle(name, fetch.fetched, hints, log)
   if (!attempt) return { kind: 'no_match' }
   if ('failure' in attempt) return { kind: 'failure', failure: attempt.failure }
-  // Accept only when the AI produced a non-empty battle name in either
-  // language — same gate as `tryFallbackTier` for figures.
-  const nameAr = attempt.result.battleData.nameAr?.trim() ?? ''
-  const nameId = attempt.result.battleData.nameId?.trim() ?? ''
-  if (nameAr.length > 0 || nameId.length > 0) {
+  if (battleExtractionLooksSubstantive(attempt.result.battleData)) {
     return { kind: 'accepted', fetched: fetch.fetched, attempt }
   }
   return { kind: 'no_match' }
@@ -464,10 +535,19 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
   //   Tier B — broader DDG search with "biografi salaf" suffix. Used only
   //            when tier A returns nothing — covers figures whose biography
   //            lives on non-whitelist (but still salaf-leaning) sites.
+  // Fallback trigger: any of
+  //   (a) extraction never ran (no sources fetched).
+  //   (b) AI returned null nameFullAr/nameFullId (sources irrelevant to
+  //       this figure).
+  //   (c) AI returned a name but NOTHING substantive — no biography, no
+  //       summary, no dates, no specialty. This catches the
+  //       "whitelist search page → 5 sources → AI echoes back input
+  //       name but writes null everywhere because the pages were just
+  //       navbar+sidebar" failure mode that left `suggestions: {}` on
+  //       Abbas bin Abdul Muthalib and similar figures.
   const needsFallback =
     !extraction ||
-    (!extraction.result.figureData.nameFullAr &&
-      !extraction.result.figureData.nameFullId)
+    !extractionLooksSubstantive(extraction.result.figureData)
   if (needsFallback) {
     const topDomains = [...whitelistDomainList]
       .sort((a, b) => b.priority - a.priority)
@@ -1135,10 +1215,12 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     if (initial) extractionAttempt = initial
   }
 
+  // Mirror runResearch — also fall back when AI echoed a name but wrote
+  // null for every substantive field (the "search-result-page-as-source"
+  // failure mode). See the matching comment above runResearch.
   const needsFallback =
     !extractionAttempt ||
-    (!extractionAttempt.result.figureData.nameFullAr &&
-      !extractionAttempt.result.figureData.nameFullId)
+    !extractionLooksSubstantive(extractionAttempt.result.figureData)
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
@@ -1588,11 +1670,11 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
   }
 
   // 7. Fallback ladder — DDG within whitelist (tier A), then broader salafi
-  //    search (tier B). Symmetric with `runResearch` for figures.
+  //    search (tier B). Same substantive check as figures: fall back when
+  //    the AI echoed the battle name but wrote null for every narrative /
+  //    metadata field (the "search-result-page-as-source" failure mode).
   const needsFallback =
-    !extraction ||
-    (!extraction.result.battleData.nameAr &&
-      !extraction.result.battleData.nameId)
+    !extraction || !battleExtractionLooksSubstantive(extraction.result.battleData)
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
@@ -2047,11 +2129,11 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
   }
 
   // 6. Fallback ladder — DDG within whitelist (tier A), then broader salafi
-  //    search (tier B). Mirrors `handleBattleIngest`.
+  //    search (tier B). Mirrors `handleBattleIngest` including the
+  //    substantive-extraction check so a name-only echo triggers fallback.
   const needsFallback =
     !extractionAttempt ||
-    (!extractionAttempt.result.battleData.nameAr &&
-      !extractionAttempt.result.battleData.nameId)
+    !battleExtractionLooksSubstantive(extractionAttempt.result.battleData)
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
