@@ -22,6 +22,11 @@ import { db } from '@athar/db'
 import { figureCategories, figures } from '@athar/db/schema'
 
 import { getActiveSubscription } from '@/lib/server/auth/subscription-gate'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
+
+/** Roles that bypass content scoping entirely — they need full DB access
+ *  to manage / review content, not to consume a paid plan. */
+const STAFF_ROLES = new Set(['admin', 'reviewer'])
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -57,6 +62,18 @@ async function resolveScope(userId: string | null): Promise<ResolvedScope> {
     }
   }
 
+  // Staff (admin / reviewer) see everything regardless of tier — they
+  // manage the catalogue, they don't pay for it.
+  const roles = await getUserRoleSlugs(userId)
+  for (const role of roles) {
+    if (STAFF_ROLES.has(role)) {
+      return {
+        categories: new Set(['__ALL__']),
+        curatedFigureIds: new Set(),
+      }
+    }
+  }
+
   const sub = await getActiveSubscription(userId)
   if (!sub) {
     return {
@@ -81,6 +98,10 @@ function checkAgainstScope(
   categorySlug: string,
   figureId: string | undefined,
 ): ContentCheck {
+  // Staff sentinel granted by resolveScope — allow everything.
+  if (scope.categories.has('__ALL__')) {
+    return { allowed: true }
+  }
   if (scope.categories.has(categorySlug)) {
     return { allowed: true }
   }
@@ -128,6 +149,9 @@ export async function filterAllowedFigureIds(
   if (figureIds.length === 0) return []
 
   const scope = await resolveScope(userId)
+
+  // Staff bypass — see everything.
+  if (scope.categories.has('__ALL__')) return [...figureIds]
 
   // Fast-path: if every figure category the system uses is included in
   // the scope AND we have no curation to check against, skip the DB

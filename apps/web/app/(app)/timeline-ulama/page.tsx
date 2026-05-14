@@ -14,6 +14,7 @@ import Link from 'next/link'
 
 import { UlamaSalafPlus } from '@/components/timeline/ulama-salaf-plus'
 import { auth, getActiveSubscription } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 
 export const metadata: Metadata = {
   title: 'Timeline Ulama Salaf',
@@ -25,23 +26,29 @@ const PRO_TIERS = new Set(['pro', 'premium'])
 
 export default async function TimelineUlamaPage() {
   // Defensive lookup — outer layout has already gated `userId`, but we
-  // re-resolve here because we *also* care about the tier slug.  If for
-  // any reason the session is missing we degrade to the preview view.
+  // re-resolve here because we *also* care about the tier slug. Staff
+  // roles (admin / reviewer) bypass the tier check entirely — they
+  // don't carry a subscription.
   let tier: string | null = null
+  let isStaff = false
   try {
     const reqHeaders = await headers()
     const session = await auth.api.getSession({ headers: reqHeaders })
     const userId = session?.user?.id
     if (userId) {
-      const active = await getActiveSubscription(userId)
-      tier = active?.tierSlug ?? null
+      const roles = await getUserRoleSlugs(userId)
+      isStaff = roles.has('admin') || roles.has('reviewer')
+      if (!isStaff) {
+        const active = await getActiveSubscription(userId)
+        tier = active?.tierSlug ?? null
+      }
     }
   } catch {
     // Tolerate auth failures — show the locked preview rather than 500.
     tier = null
   }
 
-  const hasProAccess = tier !== null && PRO_TIERS.has(tier)
+  const hasProAccess = isStaff || (tier !== null && PRO_TIERS.has(tier))
 
   return (
     <div className="flex flex-col gap-4">
