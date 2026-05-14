@@ -484,13 +484,13 @@
 - [x] **Admin page `/admin/figures`** with "Tambah Tokoh (AI)" dialog: form (name, category, gender, hints) → POST → toast → poll every 5s → "Lihat draf" deep-link to `/admin/figures/[slug]/edit` on completion. Recent jobs panel at bottom.
 - Local-dev caveat: QStash refuses to deliver to localhost (`endpoint resolves to a loopback address`). Production/Vercel preview works normally.
 
-### 7.5.5 AI Provider Admin UI — TODO
-- [ ] `app/(admin)/admin/ai-providers/page.tsx` — providers tab + role-assignment matrix tab.
-- [ ] `app/(admin)/admin/ai-providers/[id]/page.tsx` — provider detail + models sub-table.
-- [ ] `GET/POST/PUT/DELETE /api/v1/admin/ai-providers` + nested `/models` + `/ai-role-assignments`.
-- [ ] API key encryption at rest via `AI_MASTER_KEY` (AES-256-GCM); write-only field; never returned decrypted; mask as `sk-...XYZ` in responses.
-- [ ] Add permission `ai.manage`; grant to admin.
-- (Partial WIP exists in unstaged files — needs completion + commit.)
+### 7.5.5 AI Provider Admin UI
+- [x] `app/(admin)/admin/ai-providers/page.tsx` — providers tab + models tab + role-assignment matrix tab.
+- [x] `app/(admin)/admin/ai-providers/[id]/page.tsx` — provider detail + models sub-table.
+- [x] `GET/POST/PUT/PATCH/DELETE /api/v1/admin/ai-providers` (+ `/[id]/models`, `/[id]/rotate`, `/[id]/test`, `/ai-models`, `/ai-role-assignments`).
+- [x] API key encryption at rest via `AI_MASTER_KEY` (AES-256-GCM) in `@athar/ai/crypto`; write-only field; never returned decrypted; only `apiKeyLast4` in responses.
+- [x] Permission slugs `ai_providers.manage` + `ai_models.manage` already seeded (002_permissions.ts) and granted to admin in 003_role_permissions.ts.
+- Status: completed.
 
 ### 7.5.6 Ghazwah Coordinates Backfill (commit `ed7e61c`)
 - [x] 2/15 battles missing `locationId` — Ghazwah Bani Mushtaliq + Ghazwah Hunain. Added `muraysi` location (23.50N, 38.95E), `hunayn` already existed. Verified 0/15 missing after backfill.
@@ -501,7 +501,7 @@
 - [x] **CARTO URL fix**: `/raster/voyager/...` path doesn't exist on CDN (404 → blank tiles) → use `/light_all/...` matching the in-app map.
 - [x] **TimelineSpoiler**: `LABEL_GUTTER=240` + `PADDING_RIGHT=32`, subtitle fontSize 11→10 so "Imam al-Bukhari" + "Tabi'ut Tabi'in · 194 H – 256 H" fit.
 
-**Phase 7.5 status**: 23/29 items completed. Remaining 6 items (3 FE↔BE TODOs + PATCH/PUT + db.transaction sweep + AI provider UI) carried into Phase 8.
+**Phase 7.5 status**: 24/29 items completed. Remaining 5 items (3 FE↔BE TODOs + PATCH/PUT + db.transaction sweep) carried into Phase 8.
 
 ---
 

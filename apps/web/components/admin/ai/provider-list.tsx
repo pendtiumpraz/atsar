@@ -14,7 +14,8 @@
 //
 // Destructive flows go through SweetAlert (`confirm`), per project convention.
 
-import { CheckCircle2, CircleDashed, Loader2, Pencil, Zap } from 'lucide-react'
+import { CheckCircle2, CircleDashed, Loader2, Pencil, Settings, Zap } from 'lucide-react'
+import Link from 'next/link'
 import * as React from 'react'
 import { toast } from 'sonner'
 
@@ -305,6 +306,12 @@ function ProviderCard({ provider, busy, onToggle, onTest, onRotate, onEdit }: Ca
             <Button size="sm" variant="outline" onClick={onEdit} disabled={busy !== null}>
               <Pencil className="h-3.5 w-3.5" />
               Edit
+            </Button>
+            <Button asChild size="sm" variant="outline" disabled={busy !== null}>
+              <Link href={`/admin/ai-providers/${provider.id}`}>
+                <Settings className="h-3.5 w-3.5" />
+                Detail
+              </Link>
             </Button>
           </div>
         </div>
