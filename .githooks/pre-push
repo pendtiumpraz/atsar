@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Typecheck before push. Same skip-if-no-pnpm safety net.
+command -v pnpm >/dev/null 2>&1 || exit 0
+pnpm typecheck

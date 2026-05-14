@@ -1,21 +1,21 @@
 // `/reviewer/queue` — reviewer's inbox (WIREFRAMES §26).
 //
 // Server component. The `(reviewer)` layout already enforces session + role,
-// so we can fetch directly via the review service (skipping a same-process
-// HTTP hop). Three status buckets ride along on the same page so reviewers
-// can scan their pipeline at a glance:
+// so we can fetch directly from the schema (skipping a same-process HTTP
+// hop). Four buckets ride along on the same page so reviewers can scan their
+// pipeline + recent history at a glance:
 //
-//   - Pending           → `status=pending`
-//   - Sedang Revisi     → `status=in_progress`
-//   - Selesai Bulan Ini → `status=completed` (filtered client-side for the
-//                          calendar month — backend pagination doesn't have
-//                          a date filter yet; F18 will tighten this).
+//   - Pending          → `status=pending` (inbox, FIFO)
+//   - Perlu Perbaikan  → `status=completed AND decision='request_edit'`
+//                          (this calendar month)
+//   - Disetujui        → `status=completed AND decision='approve'` (this month)
+//   - Ditolak          → `status=completed AND decision='reject'` (this month)
 //
 // Each bucket pre-joins the content title + citation count + AI confidence
 // (averaged across citations) so `<QueueItem />` stays a pure presentational
 // component.
 
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
@@ -39,6 +39,7 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic'
 
 type Bucket = 'pending' | 'in_progress' | 'completed'
+type DecisionFilter = 'approve' | 'request_edit' | 'reject' | null
 
 interface JoinedAssignment {
   id: string
@@ -46,6 +47,7 @@ interface JoinedAssignment {
   contentId: string
   assignedAt: Date | null
   status: string
+  decision: string | null
   decisionAt: Date | null
 }
 
@@ -65,7 +67,15 @@ interface CitationAgg {
 async function loadAssignments(
   reviewerId: string,
   bucket: Bucket,
+  decision?: DecisionFilter,
 ): Promise<JoinedAssignment[]> {
+  const whereClauses = [
+    eq(reviewAssignments.reviewerId, reviewerId),
+    eq(reviewAssignments.status, bucket),
+    isNull(reviewAssignments.deletedAt),
+  ]
+  if (decision) whereClauses.push(eq(reviewAssignments.decision, decision))
+
   const rows = await db
     .select({
       id: reviewAssignments.id,
@@ -73,17 +83,17 @@ async function loadAssignments(
       contentId: reviewAssignments.contentId,
       assignedAt: reviewAssignments.assignedAt,
       status: reviewAssignments.status,
+      decision: reviewAssignments.decision,
       decisionAt: reviewAssignments.decisionAt,
     })
     .from(reviewAssignments)
-    .where(
-      and(
-        eq(reviewAssignments.reviewerId, reviewerId),
-        eq(reviewAssignments.status, bucket),
-        isNull(reviewAssignments.deletedAt),
-      ),
+    .where(and(...whereClauses))
+    // Pending: oldest first (FIFO inbox). Completed: newest first.
+    .orderBy(
+      bucket === 'pending'
+        ? asc(reviewAssignments.assignedAt)
+        : desc(reviewAssignments.decisionAt),
     )
-    .orderBy(asc(reviewAssignments.assignedAt))
     .limit(50)
   return rows
 }
@@ -215,14 +225,28 @@ export default async function ReviewerQueuePage() {
   // Layout already redirects unauthenticated users — defensive check.
   if (!userId) redirect('/login')
 
-  const [pending, inProgress, completedAll] = await Promise.all([
+  // Four buckets:
+  //   - pending        — inbox (FIFO).
+  //   - needs_changes  — assignments this reviewer marked `request_edit`
+  //                      (historical, scoped to this month).
+  //   - approved       — assignments this reviewer approved (historical, this month).
+  //   - rejected       — assignments this reviewer rejected (historical, this month).
+  const [pending, requestedEditAll, approvedAll, rejectedAll] = await Promise.all([
     loadAssignments(userId, 'pending'),
-    loadAssignments(userId, 'in_progress'),
-    loadAssignments(userId, 'completed'),
+    loadAssignments(userId, 'completed', 'request_edit'),
+    loadAssignments(userId, 'completed', 'approve'),
+    loadAssignments(userId, 'completed', 'reject'),
   ])
-  const completed = thisMonthOnly(completedAll)
+  const needsChanges = thisMonthOnly(requestedEditAll)
+  const approved = thisMonthOnly(approvedAll)
+  const rejected = thisMonthOnly(rejectedAll)
 
-  const hydrated = await hydrateContent([...pending, ...inProgress, ...completed])
+  const hydrated = await hydrateContent([
+    ...pending,
+    ...needsChanges,
+    ...approved,
+    ...rejected,
+  ])
 
   return (
     <div className="flex flex-col gap-6">
@@ -232,47 +256,54 @@ export default async function ReviewerQueuePage() {
             className="text-2xl font-semibold text-[rgb(var(--text))]"
             style={{ fontFamily: 'var(--font-display-latin)' }}
           >
-            Antrian Review
+            Antrian Tinjauan ({pending.length} pending)
           </h1>
           <p className="text-sm text-[rgb(var(--text-muted))]">
-            Konten yang menunggu keputusan Anda.
+            Draf konten dari AI yang menunggu keputusan Anda. Pintasan keyboard
+            tersedia di halaman review (A / R / X).
           </p>
         </div>
         <div className="text-sm text-[rgb(var(--text-muted))]">
-          {pending.length} menunggu
+          {pending.length} menunggu · {approved.length} disetujui bulan ini
         </div>
       </header>
 
       <Tabs defaultValue="pending" className="w-full">
         <TabsList>
           <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
-          <TabsTrigger value="in_progress">
-            Sedang Revisi ({inProgress.length})
+          <TabsTrigger value="needs_changes">
+            Perlu Perbaikan ({needsChanges.length})
           </TabsTrigger>
-          <TabsTrigger value="completed">
-            Selesai Bulan Ini ({completed.length})
-          </TabsTrigger>
+          <TabsTrigger value="approved">Disetujui ({approved.length})</TabsTrigger>
+          <TabsTrigger value="rejected">Ditolak ({rejected.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending" className="mt-4">
           <BucketSection
             rows={pending}
             hydrated={hydrated}
-            emptyLabel="Tidak ada konten yang menunggu review."
+            emptyLabel="Tidak ada draf yang menunggu tinjauan. ✨"
           />
         </TabsContent>
-        <TabsContent value="in_progress" className="mt-4">
+        <TabsContent value="needs_changes" className="mt-4">
           <BucketSection
-            rows={inProgress}
+            rows={needsChanges}
             hydrated={hydrated}
-            emptyLabel="Tidak ada revisi yang sedang berjalan."
+            emptyLabel="Belum ada permintaan perbaikan bulan ini."
           />
         </TabsContent>
-        <TabsContent value="completed" className="mt-4">
+        <TabsContent value="approved" className="mt-4">
           <BucketSection
-            rows={completed}
+            rows={approved}
             hydrated={hydrated}
-            emptyLabel="Belum ada review yang selesai bulan ini."
+            emptyLabel="Belum ada draf yang Anda setujui bulan ini."
+          />
+        </TabsContent>
+        <TabsContent value="rejected" className="mt-4">
+          <BucketSection
+            rows={rejected}
+            hydrated={hydrated}
+            emptyLabel="Tidak ada draf yang ditolak bulan ini."
           />
         </TabsContent>
       </Tabs>

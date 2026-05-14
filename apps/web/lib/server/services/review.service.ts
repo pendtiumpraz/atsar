@@ -11,7 +11,7 @@
 // Steps 1-3 share a single `db.batch([...])` so a partial failure can't leave
 // the workflow half-applied. Audit log (step 4) is fire-and-forget.
 
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@athar/db'
 import {
   battles,
@@ -19,9 +19,12 @@ import {
   contentRevisions,
   figures,
   reviewAssignments,
+  users,
+  whitelistDomains,
 } from '@athar/db/schema'
 import { ApiError } from '@/lib/server/api'
 import { auditLog } from '@/lib/server/services/audit.service'
+import { notificationService } from '@/lib/server/services/notification.service'
 import { hasPermission } from '@/lib/server/rbac'
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -44,10 +47,47 @@ export interface PaginatedAssignments {
   perPage: number
 }
 
+/** Per-citation whitelist annotation: priority + whether host is on whitelist. */
+export interface CitationWhitelistInfo {
+  /** Reverse lookup key: citation.id */
+  citationId: string
+  /** Resolved domain (best-effort — falls back to URL host). */
+  domain: string | null
+  /** Whitelist priority (higher = more authoritative). `null` if not on list. */
+  priority: number | null
+  /** True when the citation's host is on the active whitelist. */
+  onWhitelist: boolean
+}
+
 export interface AssignmentDetail {
   assignment: ReviewAssignmentRow
   content: Record<string, unknown> | null
   citations: (typeof citations.$inferSelect)[]
+  /** Whitelist annotation per citation — parallel to `citations[]` by id. */
+  whitelistByCitation: Record<string, CitationWhitelistInfo>
+  /** Original draft revision (lowest revision_number, action='created'). */
+  originalRevision: typeof contentRevisions.$inferSelect | null
+}
+
+/**
+ * Editable fields the reviewer can override before approving. Keeping this
+ * narrow on purpose — only the bilingual narrative columns are exposed to
+ * the review UI. Slug / category / dates stay locked to the admin surface.
+ */
+export interface ReviewerEdits {
+  nameFullId?: string | null
+  nameFullAr?: string | null
+  nameShortId?: string | null
+  nameShortAr?: string | null
+  summaryId?: string | null
+  summaryAr?: string | null
+  biographyId?: string | null
+  biographyAr?: string | null
+  // Battles use these:
+  nameId?: string | null
+  nameAr?: string | null
+  descriptionId?: string | null
+  descriptionAr?: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -267,10 +307,176 @@ export async function getAssignmentDetail(
     )
     .orderBy(asc(citations.createdAt))
 
+  // Pull whitelist priority/active-flag for every distinct domain referenced
+  // by the citations so the UI can flag rogue sources defensively (the AI
+  // pipeline should already enforce the whitelist, but a stale row could
+  // leak through — better to surface it loudly than silently trust).
+  const domains = Array.from(
+    new Set(
+      citationRows
+        .map((c) => (c.sourceDomain ?? hostFromUrl(c.sourceUrl) ?? '').toLowerCase())
+        .filter((d): d is string => d.length > 0),
+    ),
+  )
+  const whitelistRows = domains.length === 0
+    ? []
+    : await db
+        .select({
+          domain: whitelistDomains.domain,
+          priority: whitelistDomains.priority,
+          isActive: whitelistDomains.isActive,
+        })
+        .from(whitelistDomains)
+        .where(
+          and(
+            inArray(whitelistDomains.domain, domains),
+            isNull(whitelistDomains.deletedAt),
+          ),
+        )
+  const whitelistMap = new Map<string, { priority: number; isActive: boolean }>()
+  for (const w of whitelistRows) {
+    whitelistMap.set(w.domain.toLowerCase(), { priority: w.priority, isActive: w.isActive })
+  }
+  const whitelistByCitation: Record<string, CitationWhitelistInfo> = {}
+  for (const c of citationRows) {
+    const dom = (c.sourceDomain ?? hostFromUrl(c.sourceUrl) ?? '').toLowerCase() || null
+    const meta = dom ? whitelistMap.get(dom) : undefined
+    whitelistByCitation[c.id] = {
+      citationId: c.id,
+      domain: dom,
+      priority: meta?.isActive ? meta.priority : null,
+      onWhitelist: Boolean(meta?.isActive),
+    }
+  }
+
+  // First-ever revision (`action='created'`) is the original AI draft snapshot
+  // — handy for diffing the live row against what the AI initially produced.
+  const [originalRevision] = await db
+    .select()
+    .from(contentRevisions)
+    .where(
+      and(
+        eq(contentRevisions.contentType, assignment.contentType),
+        eq(contentRevisions.contentId, assignment.contentId),
+        eq(contentRevisions.action, 'created'),
+      ),
+    )
+    .orderBy(asc(contentRevisions.revisionNumber))
+    .limit(1)
+
   return {
     assignment,
     content: (contentRow as Record<string, unknown>) ?? null,
     citations: citationRows,
+    whitelistByCitation,
+    originalRevision: originalRevision ?? null,
+  }
+}
+
+/** Cheap URL → host parser; returns null for malformed URLs. */
+function hostFromUrl(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return null
+  }
+}
+
+// ── Notifications ─────────────────────────────────────────────────────
+/**
+ * Fire-and-forget notification to the admin/user who originally created the
+ * content row (`figures.created_by`). On failure we log + swallow — a Redis
+ * outage or a missing `createdBy` (legacy rows) must never break the review
+ * decision pipeline.
+ *
+ * Returns silently if there's no recipient (system-seeded rows have null
+ * createdBy).
+ */
+async function notifyAuthor(args: {
+  contentType: string
+  contentId: string
+  reviewerId: string
+  decision: 'approve' | 'reject' | 'request_edit'
+  reason?: string | null
+}): Promise<void> {
+  try {
+    // Figures and battles live in different tables with slightly different
+    // name columns. Pull the row for the right one separately so Drizzle's
+    // type inference stays sound — the union-via-cast trick was brittle.
+    let createdBy: string | null = null
+    let contentLabel: string | null = null
+    if (args.contentType === 'figure') {
+      const [row] = await db
+        .select({
+          createdBy: figures.createdBy,
+          nameId: figures.nameShortId,
+          nameAr: figures.nameShortAr,
+          nameFullId: figures.nameFullId,
+        })
+        .from(figures)
+        .where(eq(figures.id, args.contentId))
+        .limit(1)
+      createdBy = row?.createdBy ?? null
+      contentLabel = row?.nameId || row?.nameFullId || row?.nameAr || null
+    } else if (args.contentType === 'battle') {
+      const [row] = await db
+        .select({
+          createdBy: battles.createdBy,
+          nameId: battles.nameId,
+          nameAr: battles.nameAr,
+        })
+        .from(battles)
+        .where(eq(battles.id, args.contentId))
+        .limit(1)
+      createdBy = row?.createdBy ?? null
+      contentLabel = row?.nameId || row?.nameAr || null
+    }
+
+    if (!createdBy) return
+    if (createdBy === args.reviewerId) return // don't self-notify
+
+    const [reviewer] = await db
+      .select({ fullName: users.fullName, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(eq(users.id, args.reviewerId))
+      .limit(1)
+    const reviewerLabel =
+      reviewer?.displayName || reviewer?.fullName || reviewer?.email || 'ustadz reviewer'
+    const labelText = contentLabel || (args.contentType === 'figure' ? 'tokoh' : 'sirah')
+
+    const noun = args.contentType === 'figure' ? 'tokoh' : 'sirah'
+    let title: string
+    let body: string
+    if (args.decision === 'approve') {
+      title = `Draf "${labelText}" disetujui`
+      body = `Draf ${noun} ${labelText} disetujui dan dipublikasikan oleh ustadz ${reviewerLabel}.`
+    } else if (args.decision === 'reject') {
+      title = `Draf "${labelText}" ditolak`
+      body = `Draf ${noun} ${labelText} ditolak oleh ustadz ${reviewerLabel}.${args.reason ? ` Alasan: ${args.reason}` : ''}`
+    } else {
+      title = `Draf "${labelText}" perlu perbaikan`
+      body = `Draf ${noun} ${labelText} membutuhkan perbaikan dari ustadz ${reviewerLabel}.${args.reason ? ` Alasan: ${args.reason}` : ''}`
+    }
+
+    const actionUrl =
+      args.contentType === 'figure'
+        ? `/admin/figures/${args.contentId}`
+        : `/admin/battles/${args.contentId}`
+
+    await notificationService.create({
+      userId: createdBy,
+      type: `review_${args.decision}`,
+      title,
+      body,
+      actionUrl,
+    })
+  } catch (err) {
+    console.error('[review.service] notifyAuthor failed', {
+      contentType: args.contentType,
+      contentId: args.contentId,
+      decision: args.decision,
+      err,
+    })
   }
 }
 
@@ -278,13 +484,23 @@ export async function getAssignmentDetail(
 /**
  * Approve the content. Transitions:
  *   - assignment.status: pending|in_progress → completed (decision='approve')
- *   - content.status: → approved, publishedAt: → now()
- * (Note: §5c.6 mentions multi-reviewer thresholds — for now we approve on the
+ *   - content.status: → published (skips 'approved' — see §5c.2: the reviewer
+ *     is the final gate, no separate publish step), publishedAt: → now()
+ *
+ * Optional `edits` payload: when the reviewer corrected the AI draft before
+ * approving, the patch is applied to the content row AND captured as a
+ * `content_revisions` row with action='edited_manual' BEFORE the approval
+ * revision. The original AI draft (revision_number 1, action='created') is
+ * preserved untouched — that's the entire point of the immutable revisions
+ * log.
+ *
+ * (§5c.6 mentions multi-reviewer thresholds — for now we approve on the
  * first approve. Threshold logic lives at the policy layer, TBD.)
  */
 export async function approve(
   id: string,
   reviewerId: string,
+  edits?: ReviewerEdits | null,
 ): Promise<ReviewAssignmentRow> {
   const assignment = await getAssignmentById(id)
   assertReviewerOwns(assignment, reviewerId)
@@ -292,43 +508,114 @@ export async function approve(
 
   const now = new Date()
   const table = contentTable(assignment.contentType)
-  const revisionNumber = await nextRevisionNumber(
+  const cleanEdits = sanitiseEdits(assignment.contentType, edits)
+  const hasEdits = cleanEdits !== null && Object.keys(cleanEdits).length > 0
+
+  // Take a "before" snapshot so the edit revision can persist a diff for audit.
+  // The batch below would update the row before we can read it, so we snapshot
+  // here. Soft-deleted rows would've already failed assertNotCompleted.
+  let beforeSnapshot: Record<string, unknown> | null = null
+  if (hasEdits) {
+    const [row] = await db.select().from(table).where(eq(table.id, assignment.contentId)).limit(1)
+    beforeSnapshot = (row as Record<string, unknown>) ?? null
+  }
+
+  const baseRevisionNumber = await nextRevisionNumber(
     assignment.contentType,
     assignment.contentId,
   )
+  // Revision-number reservations:
+  //   - if hasEdits: edited_manual @ N, approved @ N+1, published @ N+2
+  //   - otherwise:   approved @ N,       published @ N+1
+  const editRevisionNumber = hasEdits ? baseRevisionNumber : null
+  const approvalRevisionNumber = hasEdits ? baseRevisionNumber + 1 : baseRevisionNumber
+  const publishRevisionNumber = approvalRevisionNumber + 1
 
-  const [updateResult] = await db.batch([
-    db
-      .update(reviewAssignments)
-      .set({
-        decision: 'approve',
-        status: 'completed',
-        decisionAt: now,
-        updatedAt: now,
-        updatedBy: reviewerId,
-      })
-      .where(eq(reviewAssignments.id, id))
-      .returning(),
-    db
-      .update(table)
-      .set({
-        status: 'approved',
-        publishedAt: now,
-        updatedAt: now,
-        updatedBy: reviewerId,
-      })
-      .where(eq(table.id, assignment.contentId)),
-    db.insert(contentRevisions).values({
+  // The assignment update is shared by both branches.
+  const assignmentUpdate = db
+    .update(reviewAssignments)
+    .set({
+      decision: 'approve' as const,
+      status: 'completed' as const,
+      decisionAt: now,
+      updatedAt: now,
+      updatedBy: reviewerId,
+    })
+    .where(eq(reviewAssignments.id, id))
+    .returning()
+
+  // Content row patch — varies by hasEdits.
+  const contentPatch = hasEdits && cleanEdits
+    ? db
+        .update(table)
+        .set({
+          ...(cleanEdits as Partial<typeof figures.$inferInsert>),
+          status: 'published' as const,
+          publishedAt: now,
+          updatedAt: now,
+          updatedBy: reviewerId,
+        })
+        .where(eq(table.id, assignment.contentId))
+    : db
+        .update(table)
+        .set({
+          status: 'published' as const,
+          publishedAt: now,
+          updatedAt: now,
+          updatedBy: reviewerId,
+        })
+        .where(eq(table.id, assignment.contentId))
+
+  const approvedRevision = db.insert(contentRevisions).values({
+    contentType: assignment.contentType,
+    contentId: assignment.contentId,
+    revisionNumber: approvalRevisionNumber,
+    action: 'approved' as const,
+    actorId: reviewerId,
+    actorRole: 'reviewer' as const,
+  })
+  const publishedRevision = db.insert(contentRevisions).values({
+    contentType: assignment.contentType,
+    contentId: assignment.contentId,
+    revisionNumber: publishRevisionNumber,
+    action: 'published' as const,
+    actorId: reviewerId,
+    actorRole: 'reviewer' as const,
+  })
+
+  // db.batch preserves ordering — the manual edit lands BEFORE the approval
+  // revision so the log reads chronologically.
+  let results: unknown[]
+  if (hasEdits && cleanEdits && editRevisionNumber !== null) {
+    const editRevision = db.insert(contentRevisions).values({
       contentType: assignment.contentType,
       contentId: assignment.contentId,
-      revisionNumber,
-      action: 'approved',
+      revisionNumber: editRevisionNumber,
+      action: 'edited_manual' as const,
       actorId: reviewerId,
-      actorRole: 'reviewer',
-    }),
-  ])
+      actorRole: 'reviewer' as const,
+      diff: {
+        before: pickEditedFields(beforeSnapshot, cleanEdits),
+        after: cleanEdits,
+      },
+    })
+    results = await db.batch([
+      assignmentUpdate,
+      editRevision,
+      contentPatch,
+      approvedRevision,
+      publishedRevision,
+    ])
+  } else {
+    results = await db.batch([
+      assignmentUpdate,
+      contentPatch,
+      approvedRevision,
+      publishedRevision,
+    ])
+  }
 
-  const updated = (updateResult as ReviewAssignmentRow[])[0]
+  const updated = (results[0] as ReviewAssignmentRow[])[0]
   if (!updated) throw new ApiError('INTERNAL_ERROR', 'Failed to record approval')
 
   await auditLog.write({
@@ -341,17 +628,85 @@ export async function approve(
       decision: 'approve',
       contentType: assignment.contentType,
       contentId: assignment.contentId,
+      edited: hasEdits,
     },
+  })
+
+  await notifyAuthor({
+    contentType: assignment.contentType,
+    contentId: assignment.contentId,
+    reviewerId,
+    decision: 'approve',
   })
 
   return updated
 }
 
+/**
+ * Drop empty / unknown keys from a reviewer edits payload. Only fields that
+ * belong to the requested content type are kept; everything else is stripped
+ * so a malicious payload can't sneak `slug` or `categoryId` through.
+ */
+function sanitiseEdits(
+  contentType: string,
+  edits: ReviewerEdits | null | undefined,
+): Record<string, string | null> | null {
+  if (!edits || typeof edits !== 'object') return null
+
+  const FIGURE_FIELDS = new Set([
+    'nameFullId',
+    'nameFullAr',
+    'nameShortId',
+    'nameShortAr',
+    'summaryId',
+    'summaryAr',
+    'biographyId',
+    'biographyAr',
+  ])
+  const BATTLE_FIELDS = new Set([
+    'nameId',
+    'nameAr',
+    'summaryId',
+    'summaryAr',
+    'descriptionId',
+    'descriptionAr',
+  ])
+  const allowed = contentType === 'figure' ? FIGURE_FIELDS : BATTLE_FIELDS
+
+  const out: Record<string, string | null> = {}
+  for (const [key, value] of Object.entries(edits)) {
+    if (!allowed.has(key)) continue
+    if (value === undefined) continue
+    if (value === null) {
+      out[key] = null
+      continue
+    }
+    if (typeof value !== 'string') continue
+    out[key] = value
+  }
+  return out
+}
+
+/** Pluck the same set of keys from the before-snapshot for diff logging. */
+function pickEditedFields(
+  before: Record<string, unknown> | null,
+  edits: Record<string, string | null>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!before) return out
+  for (const key of Object.keys(edits)) {
+    out[key] = before[key] ?? null
+  }
+  return out
+}
+
 // ── Reject ────────────────────────────────────────────────────────────
 /**
- * Reject the content. Assignment closes with decision='reject'; the parent
- * content's `status` is intentionally NOT bumped — admin decides whether to
- * archive / re-route / re-extract.
+ * Reject the content. Assignment closes with decision='reject' AND the
+ * parent content row flips to `status='archived'` — the reviewer's verdict
+ * is "this draft shouldn't be published as-is", and we don't want orphan
+ * drafts sitting at status='under_review' forever. Admin can always restore
+ * via the trash flow if a rejection was in error.
  */
 export async function reject(
   id: string,
@@ -363,6 +718,7 @@ export async function reject(
   assertNotCompleted(assignment)
 
   const now = new Date()
+  const table = contentTable(assignment.contentType)
   const revisionNumber = await nextRevisionNumber(
     assignment.contentType,
     assignment.contentId,
@@ -381,6 +737,14 @@ export async function reject(
       })
       .where(eq(reviewAssignments.id, id))
       .returning(),
+    db
+      .update(table)
+      .set({
+        status: 'archived',
+        updatedAt: now,
+        updatedBy: reviewerId,
+      })
+      .where(eq(table.id, assignment.contentId)),
     db.insert(contentRevisions).values({
       contentType: assignment.contentType,
       contentId: assignment.contentId,
@@ -407,6 +771,14 @@ export async function reject(
       contentType: assignment.contentType,
       contentId: assignment.contentId,
     },
+  })
+
+  await notifyAuthor({
+    contentType: assignment.contentType,
+    contentId: assignment.contentId,
+    reviewerId,
+    decision: 'reject',
+    reason,
   })
 
   return updated
@@ -503,6 +875,14 @@ export async function requestEdit(
       contentType: assignment.contentType,
       contentId: assignment.contentId,
     },
+  })
+
+  await notifyAuthor({
+    contentType: assignment.contentType,
+    contentId: assignment.contentId,
+    reviewerId,
+    decision: 'request_edit',
+    reason: instruction,
   })
 
   return updated

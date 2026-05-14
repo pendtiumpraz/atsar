@@ -1,12 +1,16 @@
-// `/reviewer/review/[id]` — side-by-side review surface (WIREFRAMES §27).
+// `/reviewer/review/[id]` — three-pane review surface (WIREFRAMES §27).
 //
-// Server component. We load the assignment + content + citations directly via
-// `reviewService.getAssignmentDetail` (same call the API route uses) so the
-// initial render is fully populated.
+// Server component. We load the assignment + content + citations + whitelist
+// annotations directly via `reviewService.getAssignmentDetail` (same call the
+// API route uses) so the initial render is fully populated.
 //
 // Layout:
-//   <ReviewSideBySide />   — left = source iframe / right = drafted content
-//   <DecisionBar />        — sticky bottom: Approve / Request Edit / Reject
+//   <ReviewWorkspace />    — three-pane (draft / editable form / citations)
+//   <DecisionBar />        — sticky bottom: Setuju / Minta Perbaikan / Tolak
+//
+// Both components live inside a shared `EditsContext` (provider lives in
+// `<ReviewWorkspace />`), so the DecisionBar can pick up reviewer edits and
+// pass them on the /approve POST.
 
 import Link from 'next/link'
 import type { Metadata } from 'next'
@@ -16,9 +20,11 @@ import { z } from 'zod'
 
 import { DecisionBar } from '@/components/reviewer/decision-bar'
 import {
-  ReviewSideBySide,
-  type ReviewCitation,
-} from '@/components/reviewer/review-side-by-side'
+  ReviewWorkspace,
+  ReviewWorkspaceProvider,
+  type WorkspaceCitation,
+  type WorkspaceEdits,
+} from '@/components/reviewer/review-workspace'
 import { auth } from '@/lib/server/auth'
 import { reviewService } from '@/lib/server/services/review.service'
 
@@ -49,6 +55,38 @@ function pickString(
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
+/**
+ * Project a content row onto the {@link WorkspaceEdits} shape. Unknown fields
+ * just stay undefined — keeping it loose lets us share one component between
+ * figures and battles without two separate prop signatures.
+ */
+function toWorkspaceEdits(
+  row: Record<string, unknown> | null,
+  contentType: string,
+): WorkspaceEdits {
+  if (!row) return {}
+  const keys: (keyof WorkspaceEdits)[] =
+    contentType === 'figure'
+      ? [
+          'nameFullId',
+          'nameFullAr',
+          'nameShortId',
+          'nameShortAr',
+          'summaryId',
+          'summaryAr',
+          'biographyId',
+          'biographyAr',
+        ]
+      : ['nameId', 'nameAr', 'summaryId', 'summaryAr', 'descriptionId', 'descriptionAr']
+  const out: WorkspaceEdits = {}
+  for (const k of keys) {
+    const value = row[k]
+    if (typeof value === 'string') out[k] = value
+    else if (value === null) out[k] = null
+  }
+  return out
+}
+
 export default async function ReviewerReviewPage({ params }: ReviewPageProps) {
   const { id: rawId } = await params
   const parsed = idSchema.safeParse(rawId)
@@ -69,10 +107,9 @@ export default async function ReviewerReviewPage({ params }: ReviewPageProps) {
     notFound()
   }
 
-  const { assignment, content, citations } = detail
+  const { assignment, content, citations, whitelistByCitation, originalRevision } = detail
 
-  // Title + body fields differ slightly between figures and battles. We pluck
-  // the right pair so the side-by-side renderer stays content-agnostic.
+  // Title — used in the header and the approval-confirmation modal.
   const isFigure = assignment.contentType === 'figure'
   const titleId = isFigure
     ? pickString(content, 'nameShortId') ?? pickString(content, 'nameFullId')
@@ -80,28 +117,39 @@ export default async function ReviewerReviewPage({ params }: ReviewPageProps) {
   const titleAr = isFigure
     ? pickString(content, 'nameShortAr') ?? pickString(content, 'nameFullAr')
     : pickString(content, 'nameAr')
-  const bodyId = isFigure
-    ? pickString(content, 'biographyId') ?? pickString(content, 'summaryId')
-    : pickString(content, 'descriptionId') ?? pickString(content, 'summaryId')
-  const bodyAr = isFigure
-    ? pickString(content, 'biographyAr') ?? pickString(content, 'summaryAr')
-    : pickString(content, 'descriptionAr') ?? pickString(content, 'summaryAr')
-
   const displayTitle = titleId || titleAr || `(tanpa judul) · ${assignment.contentId.slice(0, 8)}`
 
-  // Coerce citation rows to the lightweight shape the client expects.
-  // confidenceScore comes back as a string (numeric) — leave it as `string |
-  // number` and let the client format if needed.
-  const reviewCitations: ReviewCitation[] = citations.map((c) => ({
-    id: c.id,
-    sourceUrl: c.sourceUrl,
-    sourceDomain: c.sourceDomain,
-    sourceExcerptId: c.sourceExcerptId,
-    sourceExcerptAr: c.sourceExcerptAr,
-    sourceLang: c.sourceLang,
-    fieldPath: c.fieldPath,
-    confidenceScore: c.confidenceScore,
-  }))
+  // Snapshot the content row as the editable draft + remember the original
+  // (= the AI's first revision when available, otherwise the current state).
+  // Reviewer edits diff against the original snapshot, not the live draft,
+  // so the "↺ Revert" button always restores the AI starting point.
+  const draftEdits = toWorkspaceEdits(content, assignment.contentType)
+  const originalDiff = (originalRevision?.diff ?? null) as Record<string, unknown> | null
+  // `content_revisions.diff` for the 'created' action holds an `{ after: { ... } }`
+  // snapshot (per figure.service.create). Fall back to live draft if we
+  // can't recover the original.
+  const originalRow =
+    originalDiff && typeof originalDiff['after'] === 'object' && originalDiff['after'] !== null
+      ? (originalDiff['after'] as Record<string, unknown>)
+      : content
+  const originalEdits = toWorkspaceEdits(originalRow, assignment.contentType)
+
+  // Hydrate citations with their whitelist annotation.
+  const workspaceCitations: WorkspaceCitation[] = citations.map((c) => {
+    const wl = whitelistByCitation[c.id]
+    return {
+      id: c.id,
+      sourceUrl: c.sourceUrl,
+      sourceDomain: c.sourceDomain,
+      sourceExcerptId: c.sourceExcerptId,
+      sourceExcerptAr: c.sourceExcerptAr,
+      sourceLang: c.sourceLang,
+      fieldPath: c.fieldPath,
+      confidenceScore: c.confidenceScore,
+      whitelistPriority: wl?.priority ?? null,
+      onWhitelist: wl?.onWhitelist ?? false,
+    }
+  })
 
   return (
     <div className="flex flex-col gap-4">
@@ -119,6 +167,16 @@ export default async function ReviewerReviewPage({ params }: ReviewPageProps) {
           >
             Review: {displayTitle}
           </h1>
+          {titleAr ? (
+            <span
+              lang="ar"
+              dir="rtl"
+              className="text-base text-[rgb(var(--text-muted))]"
+              style={{ fontFamily: 'var(--font-body-arab)' }}
+            >
+              {titleAr}
+            </span>
+          ) : null}
         </div>
         <span className="text-xs text-[rgb(var(--text-muted))]">
           Status: {assignment.status}
@@ -127,14 +185,16 @@ export default async function ReviewerReviewPage({ params }: ReviewPageProps) {
         </span>
       </header>
 
-      <ReviewSideBySide
-        title={displayTitle}
-        bodyId={bodyId}
-        bodyAr={bodyAr}
-        citations={reviewCitations}
-      />
+      <ReviewWorkspaceProvider initialEdits={draftEdits} baseline={originalEdits}>
+        <ReviewWorkspace
+          contentType={assignment.contentType}
+          draft={draftEdits}
+          original={originalEdits}
+          citations={workspaceCitations}
+        />
 
-      <DecisionBar assignmentId={assignment.id} contentLabel={displayTitle} />
+        <DecisionBar assignmentId={assignment.id} contentLabel={displayTitle} />
+      </ReviewWorkspaceProvider>
     </div>
   )
 }
