@@ -1,23 +1,31 @@
-// `/admin/users/[id]` — single user detail (WIREFRAMES §19 follow-on).
+// `/admin/users/[id]` — single user detail.
 //
-// Server component. Fetches the user via the user service directly (same
-// process — skipping a self-HTTP hop) and renders a profile card plus a
-// recent-activity placeholder. The activity panel is intentionally light:
-// Phase 7 will wire it to `admin/audit-logs?actorId=<id>`. For now we surface
-// the basic identity, role badges, registration / last-login timestamps and
-// a link to the audit log.
+// Server component. Loads the canonical user row + the tier catalog (so the
+// activate-subscription dialog renders without a second round-trip), then
+// hands off to `<UserDetailClient />` for the interactive sections (roles
+// dialog, subscription summary, payment history, audit log, danger zone).
+//
+// Sections rendered on this page:
+//   1. Identity card (server) — avatar, full name, email, status, register +
+//      last-login timestamps. No client state needed.
+//   2. <UserDetailClient /> — every interactive section, see its module doc.
 
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { z } from 'zod'
 import { ArrowLeft } from 'lucide-react'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { db } from '@athar/db'
+import { tiers } from '@athar/db/schema'
 import * as userService from '@/lib/server/services/user.service'
+import { UserDetailClient } from '@/components/admin/users/user-detail-client'
+import type { ActivateTierOption } from '@/components/admin/subscriptions/activate-dialog'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,6 +74,32 @@ function Field({ label, children }: FieldProps) {
   )
 }
 
+async function loadTiers(): Promise<ActivateTierOption[]> {
+  try {
+    const rows = await db
+      .select({
+        id: tiers.id,
+        slug: tiers.slug,
+        nameId: tiers.nameId,
+        priceMonthlyIdr: tiers.priceMonthlyIdr,
+        priceYearlyIdr: tiers.priceYearlyIdr,
+        displayOrder: tiers.displayOrder,
+      })
+      .from(tiers)
+      .where(and(isNull(tiers.deletedAt), eq(tiers.isActive, true)))
+      .orderBy(asc(tiers.displayOrder), asc(tiers.priceMonthlyIdr))
+    return rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      nameId: r.nameId,
+      priceMonthlyIdr: r.priceMonthlyIdr,
+      priceYearlyIdr: r.priceYearlyIdr,
+    }))
+  } catch {
+    return []
+  }
+}
+
 export default async function AdminUserDetailPage({ params }: DetailProps) {
   const { id: rawId } = await params
   const parsed = idSchema.safeParse(rawId)
@@ -78,6 +112,8 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
     notFound()
   }
 
+  const tierList = await loadTiers()
+
   const status = user.deletedAt
     ? { label: 'Terhapus', cls: 'border-[rgb(var(--danger))] text-[rgb(var(--danger))]' }
     : user.emailVerifiedAt
@@ -89,7 +125,7 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" asChild>
-            <Link href="/users">
+            <Link href="/admin/users">
               <ArrowLeft className="h-4 w-4" />
               Kembali
             </Link>
@@ -107,7 +143,7 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        {/* ── Profile card ─────────────────────────────────────────── */}
+        {/* ── Identity / profile card (server-rendered) ──────────── */}
         <Card>
           <CardHeader>
             <CardTitle>Profil</CardTitle>
@@ -131,17 +167,6 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
                   <Badge variant="outline" className={status.cls}>
                     {status.label}
                   </Badge>
-                  {user.roleSlugs.length > 0 ? (
-                    user.roleSlugs.map((slug) => (
-                      <Badge key={slug} variant="secondary">
-                        {slug}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-xs text-[rgb(var(--text-muted))]">
-                      Belum punya role
-                    </span>
-                  )}
                 </div>
               </div>
             </div>
@@ -157,7 +182,7 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
           </CardContent>
         </Card>
 
-        {/* ── Activity / meta side panel ───────────────────────────── */}
+        {/* ── Activity meta side panel ──────────────────────────── */}
         <div className="flex flex-col gap-4">
           <Card>
             <CardHeader>
@@ -169,36 +194,30 @@ export default async function AdminUserDetailPage({ params }: DetailProps) {
               <Field label="Aktif Terakhir">{formatDateTime(user.lastActiveAt)}</Field>
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Subscription</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Subscription detail joins are coming in Phase 7. For now we
-                  link to the subscriptions admin panel filtered by user. */}
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/subscriptions?userId=${user.id}`}>
-                  Lihat di Subscriptions →
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Riwayat</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/audit-logs?actorId=${user.id}`}>
-                  Lihat Audit Log →
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
         </div>
       </div>
+
+      {/* ── Interactive sections (roles, subscription, payments,
+            audit, danger zone) — wrapped in a client component. */}
+      <UserDetailClient
+        user={{
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          displayName: user.displayName,
+          emailVerifiedAt:
+            user.emailVerifiedAt instanceof Date
+              ? user.emailVerifiedAt.toISOString()
+              : user.emailVerifiedAt,
+          deletedAt:
+            user.deletedAt instanceof Date
+              ? user.deletedAt.toISOString()
+              : user.deletedAt,
+          roleIds: user.roleIds,
+          roleSlugs: user.roleSlugs,
+        }}
+        tiers={tierList}
+      />
     </div>
   )
 }

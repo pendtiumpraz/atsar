@@ -1,4 +1,5 @@
-// PUT    /api/v1/admin/whitelist/[id]  — update a whitelist domain
+// PATCH  /api/v1/admin/whitelist/[id]  — update a whitelist domain (partial)
+// PUT    /api/v1/admin/whitelist/[id]  — alias for PATCH (legacy callers)
 // DELETE /api/v1/admin/whitelist/[id]  — soft-delete a whitelist domain
 // Permission: `whitelist.manage`.
 
@@ -31,13 +32,16 @@ const updateSchema = z.object({
 
 type RouteCtx = { params: Promise<{ id: string }> | { id: string } }
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'whitelist.manage')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
   const row = await whitelistService.update(id, input, userId)
   return ok(row)
 })
+
+// Legacy PUT alias — whitelist-table.tsx still sends PUT.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'whitelist.manage')

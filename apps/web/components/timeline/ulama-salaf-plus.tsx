@@ -7,10 +7,16 @@
 //     full visx + D3 genealogy network described in the wireframe — full
 //     network rendering is deferred until we have genealogy edges in the
 //     API.
-//   - Filters: spesialisasi, mazhab, wilayah — wired as client-side
-//     selects that narrow the rendered items.  The list query itself is
-//     fixed to fetch the four "ulama-relevant" categories and trim
-//     locally.
+//   - Filters: spesialisasi, madhab — wired as client-side selects that
+//     narrow the rendered items.  The list query itself is fixed to fetch
+//     the four "ulama-relevant" categories and trim locally.
+//   - Region/wilayah filter is deferred: the `figures` table doesn't carry
+//     a region column, so filtering would silently drop every row. When
+//     the API surfaces `birthLocationId` / `deathLocationId` joins, this
+//     filter can come back.
+//
+// Field naming: figures API returns Drizzle rows verbatim, so keys are
+// camelCase (`nameFullId`, `birthDateAh`, `specialty`, `madhab`).
 //
 // All in one client component so we don't have to thread state.
 
@@ -26,20 +32,19 @@ import { figuresApi } from '@/lib/api/endpoints'
 // Side-effect CSS import — Next handles bundling at build time.
 import 'vis-timeline/styles/vis-timeline-graph2d.min.css'
 
-// Loose figure type — mirrors `ApiFigure` used elsewhere.  We tolerate
-// missing fields because some seed rows lack metadata.
+// Figure type — keys mirror the Drizzle row shape the API serialises.
 type UlamaFigure = {
   id: string
   slug: string
-  name_full_id?: string | null
-  name_full_ar?: string | null
-  birth_date_ah?: number | null
-  death_date_ah?: number | null
-  // Free-form tagging fields — backend may surface these under various
-  // names.  We probe a few common shapes.
-  specializations?: string[] | null
-  mazhab?: string | null
-  region?: string | null
+  nameFullId?: string | null
+  nameFullAr?: string | null
+  birthDateAh?: number | null
+  deathDateAh?: number | null
+  // `specialty` is a text[] column on `figures` (e.g. ['hadits','fiqh']).
+  specialty?: string[] | null
+  // `madhab` is a DB enum: 'shafii' | 'maliki' | 'hanafi' | 'hanbali' |
+  // 'zhahiri' | 'no_madhab' (see packages/db schema enums.ts).
+  madhab?: string | null
   category?: { slug?: string | null } | null
 }
 
@@ -51,8 +56,18 @@ const GENERATION_GROUPS = [
 ] as const
 
 const SPESIALISASI_OPTIONS = ['Hadits', 'Fiqh', 'Tafsir', 'Aqidah', 'Lughah']
-const MAZHAB_OPTIONS = ['Syafii', 'Maliki', 'Hanafi', 'Hanbali']
-const WILAYAH_OPTIONS = ['Mekkah', 'Madinah', 'Baghdad', 'Bashrah', 'Damaskus', 'Mesir']
+
+// Madhab options: value matches the DB enum, label is the Indonesian
+// display form. Keep these in lock-step with `madhabEnum` in
+// packages/db/src/schema/enums.ts.
+const MADHAB_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'shafii', label: "Syafi'i" },
+  { value: 'maliki', label: 'Maliki' },
+  { value: 'hanafi', label: 'Hanafi' },
+  { value: 'hanbali', label: 'Hanbali' },
+  { value: 'zhahiri', label: 'Zhahiri' },
+  { value: 'no_madhab', label: 'Tanpa Madzhab' },
+]
 
 export interface UlamaSalafPlusProps {
   mode?: CalendarMode
@@ -64,7 +79,7 @@ function ahYearToDate(ah: number): Date {
 }
 
 function figureLabel(f: UlamaFigure): string {
-  return f.name_full_id || f.name_full_ar || f.slug
+  return f.nameFullId || f.nameFullAr || f.slug
 }
 
 function getGenerationGroup(f: UlamaFigure): string | null {
@@ -78,8 +93,7 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
   const timelineRef = useRef<unknown>(null)
 
   const [spesialisasi, setSpesialisasi] = useState<string>('')
-  const [mazhab, setMazhab] = useState<string>('')
-  const [wilayah, setWilayah] = useState<string>('')
+  const [madhab, setMadhab] = useState<string>('')
 
   // Fetch the four generation categories in parallel; reuse TanStack cache.
   const queries = useQueries({
@@ -113,18 +127,15 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
   const filtered = useMemo(() => {
     return allFigures.filter((f) => {
       if (spesialisasi) {
-        const tags = f.specializations ?? []
+        const tags = f.specialty ?? []
         if (!tags.map((t) => t.toLowerCase()).includes(spesialisasi.toLowerCase())) return false
       }
-      if (mazhab) {
-        if ((f.mazhab ?? '').toLowerCase() !== mazhab.toLowerCase()) return false
-      }
-      if (wilayah) {
-        if ((f.region ?? '').toLowerCase() !== wilayah.toLowerCase()) return false
+      if (madhab) {
+        if ((f.madhab ?? '') !== madhab) return false
       }
       return true
     })
-  }, [allFigures, spesialisasi, mazhab, wilayah])
+  }, [allFigures, spesialisasi, madhab])
 
   // Render vis-timeline.  Lazy-import to keep SSR healthy.
   useEffect(() => {
@@ -161,8 +172,8 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
       for (const f of filtered) {
         const group = getGenerationGroup(f)
         if (!group) continue
-        const birth = typeof f.birth_date_ah === 'number' ? f.birth_date_ah : null
-        const death = typeof f.death_date_ah === 'number' ? f.death_date_ah : null
+        const birth = typeof f.birthDateAh === 'number' ? f.birthDateAh : null
+        const death = typeof f.deathDateAh === 'number' ? f.deathDateAh : null
         if (birth === null && death === null) continue
 
         const startAh = birth ?? (death !== null ? death - 60 : 0)
@@ -230,19 +241,13 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
           label="Spesialisasi"
           value={spesialisasi}
           onChange={setSpesialisasi}
-          options={SPESIALISASI_OPTIONS}
+          options={SPESIALISASI_OPTIONS.map((o) => ({ value: o, label: o }))}
         />
         <FilterSelect
-          label="Mazhab"
-          value={mazhab}
-          onChange={setMazhab}
-          options={MAZHAB_OPTIONS}
-        />
-        <FilterSelect
-          label="Wilayah"
-          value={wilayah}
-          onChange={setWilayah}
-          options={WILAYAH_OPTIONS}
+          label="Madzhab"
+          value={madhab}
+          onChange={setMadhab}
+          options={MADHAB_OPTIONS}
         />
         <div className="ml-auto text-xs text-[rgb(var(--text-faint))]">
           {isLoading
@@ -277,7 +282,7 @@ function FilterSelect({
   label: string
   value: string
   onChange: (v: string) => void
-  options: string[]
+  options: Array<{ value: string; label: string }>
 }) {
   return (
     <label className="flex flex-col gap-1 text-xs text-[rgb(var(--text-muted))]">
@@ -289,8 +294,8 @@ function FilterSelect({
       >
         <option value="">Semua {label.toLowerCase()}</option>
         {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
           </option>
         ))}
       </select>

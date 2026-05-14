@@ -12,11 +12,14 @@
 // Wireframes: docs/WIREFRAMES.md §6, FRONTEND.md §5.
 
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 
 import { FigureCategoryTabs } from '@/components/figures/figure-category-tabs'
 import { FigureFilterBar } from '@/components/figures/figure-filter-bar'
 import { FigureGrid } from '@/components/figures/figure-grid'
 import { ListDetailShell } from '@/components/figures/list-detail-shell'
+import { auth } from '@/lib/server/auth'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 
 export const metadata: Metadata = {
   title: 'Tokoh',
@@ -43,9 +46,14 @@ export default async function FiguresPage({ searchParams }: FiguresPageProps) {
   const pageRaw = pick(sp.page)
   const page = pageRaw ? Math.max(1, Number(pageRaw) || 1) : 1
 
-  // TODO(admin): when `?modal=create` is present and the viewer has
-  // `figures.create` permission, render a create modal.  Skipped per F10
-  // scope — F18 owns the admin overlay.
+  // Show the admin-only "Sampah" pill if the viewer is in the admin role.
+  // Cheap — the session lookup is already cached for this request thanks to
+  // the surrounding (app) layout having read it once.
+  const reqHeaders = await headers()
+  const session = await auth.api.getSession({ headers: reqHeaders })
+  const isAdmin = session?.user?.id
+    ? (await getUserRoleSlugs(session.user.id)).has('admin')
+    : false
 
   return (
     <div className="flex flex-col gap-4">
@@ -58,7 +66,7 @@ export default async function FiguresPage({ searchParams }: FiguresPageProps) {
         </h1>
       </div>
 
-      <FigureCategoryTabs />
+      <FigureCategoryTabs showTrash={isAdmin} />
       <FigureFilterBar />
 
       <ListDetailShell

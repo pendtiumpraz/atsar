@@ -1,5 +1,6 @@
 // GET    /api/v1/battles/:slug   → detail with phases + participant count
-// PUT    /api/v1/battles/:slug   → update
+// PATCH  /api/v1/battles/:slug   → update (partial)
+// PUT    /api/v1/battles/:slug   → alias for PATCH (legacy callers)
 // DELETE /api/v1/battles/:slug   → soft delete (cascade to phases)
 //
 // See docs/BACKEND.md §4 + docs/WIREFRAMES.md §6.
@@ -18,13 +19,17 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(battle)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'battles.update')
   const { slug } = await ctx.params
   const body = await validateBody(req, updateBattleSchema)
   const updated = await battleService.update(slug, body, userId)
   return ok(updated)
 })
+
+// Legacy PUT alias — the FE client uses PATCH, but some older callers still
+// send PUT.  Delegating keeps the surface backwards-compatible.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'battles.delete')

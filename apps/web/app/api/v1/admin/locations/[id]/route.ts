@@ -1,4 +1,5 @@
-// PUT    /api/v1/admin/locations/[id]  — update a location
+// PATCH  /api/v1/admin/locations/[id]  — update a location (partial)
+// PUT    /api/v1/admin/locations/[id]  — alias for PATCH (legacy callers)
 // DELETE /api/v1/admin/locations/[id]  — soft-delete a location
 // Permissions: `locations.update` / `locations.delete`.
 
@@ -41,13 +42,17 @@ const updateSchema = z.object({
 
 type RouteCtx = { params: Promise<{ id: string }> | { id: string } }
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'locations.update')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
   const row = await locationService.update(id, input, userId)
   return ok(row)
 })
+
+// Legacy PUT alias — FE client uses PATCH; older callers (e.g.
+// location-form.tsx) still send PUT.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'locations.delete')

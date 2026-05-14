@@ -152,7 +152,7 @@ export function UserActionsMenu({ user, onMutated }: UserActionsMenuProps) {
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuLabel>Tindakan</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => router.push(`/users/${user.id}`)}>
+          <DropdownMenuItem onClick={() => router.push(`/admin/users/${user.id}`)}>
             <Eye className="h-4 w-4" />
             Lihat Detail
           </DropdownMenuItem>

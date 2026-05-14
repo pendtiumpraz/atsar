@@ -103,6 +103,76 @@ export async function create(
   return inserted
 }
 
+// ── Update ────────────────────────────────────────────────────────────
+export interface UpdateCitationInput {
+  fieldPath?: string | null
+  sourceUrl?: string
+  sourceExcerptAr?: string | null
+  sourceExcerptId?: string | null
+  sourceLang?: 'ar' | 'id' | 'en' | null
+  modelUsed?: string | null
+  confidenceScore?: string | null
+}
+
+/**
+ * Patch a citation's mutable fields.  `sourceDomain` is re-derived from
+ * `sourceUrl` when the latter changes so the whitelist index stays accurate.
+ * Audit-logs the change.
+ */
+export async function update(
+  id: string,
+  input: UpdateCitationInput,
+  actorId: string,
+): Promise<CitationRow> {
+  const before = await db.query.citations.findFirst({
+    where: and(eq(citations.id, id), isNull(citations.deletedAt)),
+  })
+  if (!before) throw new ApiError('NOT_FOUND', `Citation not found: ${id}`)
+
+  const patch: Partial<typeof citations.$inferInsert> = {
+    updatedAt: new Date(),
+    updatedBy: actorId,
+  }
+  if (input.fieldPath !== undefined) patch.fieldPath = input.fieldPath
+  if (input.sourceUrl !== undefined) {
+    patch.sourceUrl = input.sourceUrl
+    patch.sourceDomain = extractDomain(input.sourceUrl)
+  }
+  if (input.sourceExcerptAr !== undefined) patch.sourceExcerptAr = input.sourceExcerptAr
+  if (input.sourceExcerptId !== undefined) patch.sourceExcerptId = input.sourceExcerptId
+  if (input.sourceLang !== undefined) patch.sourceLang = input.sourceLang
+  if (input.modelUsed !== undefined) patch.modelUsed = input.modelUsed
+  if (input.confidenceScore !== undefined) patch.confidenceScore = input.confidenceScore
+
+  const [row] = await db
+    .update(citations)
+    .set(patch)
+    .where(eq(citations.id, id))
+    .returning()
+
+  if (!row) throw new ApiError('NOT_FOUND', `Citation not found: ${id}`)
+
+  await auditLog.write({
+    actorId,
+    action: 'update',
+    resourceType: 'citation',
+    resourceId: id,
+    diff: {
+      ...(input.sourceUrl !== undefined && input.sourceUrl !== before.sourceUrl
+        ? { sourceUrl: [before.sourceUrl, row.sourceUrl] }
+        : {}),
+      ...(input.fieldPath !== undefined && input.fieldPath !== before.fieldPath
+        ? { fieldPath: [before.fieldPath, row.fieldPath] }
+        : {}),
+      ...(input.sourceLang !== undefined && input.sourceLang !== before.sourceLang
+        ? { sourceLang: [before.sourceLang, row.sourceLang] }
+        : {}),
+    },
+  })
+
+  return row
+}
+
 // ── Soft delete ───────────────────────────────────────────────────────
 export async function softDelete(id: string, actorId: string): Promise<void> {
   const row = await db.query.citations.findFirst({
@@ -128,5 +198,6 @@ export async function softDelete(id: string, actorId: string): Promise<void> {
 export const citationService = {
   listForContent,
   create,
+  update,
   softDelete,
 }

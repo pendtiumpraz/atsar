@@ -1,5 +1,6 @@
 // GET    /api/v1/admin/users/[id]   — `users.view`
-// PUT    /api/v1/admin/users/[id]   — `users.update`
+// PATCH  /api/v1/admin/users/[id]   — `users.update` (partial)
+// PUT    /api/v1/admin/users/[id]   — alias for PATCH (legacy callers)
 // DELETE /api/v1/admin/users/[id]   — `users.delete` (soft, refuses last admin)
 
 import { z } from 'zod'
@@ -26,7 +27,7 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(row)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   await requirePermission(req, 'users.update')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
@@ -34,6 +35,9 @@ export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const row = await userService.update(id, input, null)
   return ok(row)
 })
+
+// Legacy PUT alias — FE client uses PATCH.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   await requirePermission(req, 'users.delete')

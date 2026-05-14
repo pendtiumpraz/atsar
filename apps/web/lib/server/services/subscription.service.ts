@@ -37,6 +37,7 @@ export interface ActivateInput {
 
 export interface ListAllInput {
   status?: 'trial' | 'active' | 'expired' | 'cancelled'
+  userId?: string
   page: number
   perPage: number
 }
@@ -274,11 +275,12 @@ export async function expire(subscriptionId: string): Promise<void> {
  * `subscriptions.view` permission.
  */
 export async function listAll(input: ListAllInput): Promise<PaginatedSubscriptions> {
-  const { status, page, perPage } = input
+  const { status, userId, page, perPage } = input
   const offset = (page - 1) * perPage
 
   const filters: SQL[] = [isNull(subscriptions.deletedAt)]
   if (status) filters.push(eq(subscriptions.status, status))
+  if (userId) filters.push(eq(subscriptions.userId, userId))
   const whereExpr = and(...filters)
 
   const [rows, totalRow] = await Promise.all([

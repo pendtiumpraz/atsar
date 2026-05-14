@@ -1,5 +1,6 @@
 // GET    /api/v1/admin/quizzes/:id — full detail (includes is_correct).
-// PUT    /api/v1/admin/quizzes/:id — update quiz metadata.
+// PATCH  /api/v1/admin/quizzes/:id — update quiz metadata (partial).
+// PUT    /api/v1/admin/quizzes/:id — alias for PATCH (legacy callers).
 // DELETE /api/v1/admin/quizzes/:id — soft delete (cascade to questions/options).
 // Permission: `quiz.manage`.
 
@@ -27,13 +28,16 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(quiz)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'quiz.manage')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const body = await validateBody(req, updateQuizSchema)
   const row = await quizService.update(id, body, userId)
   return ok(row)
 })
+
+// Legacy PUT alias — FE client uses PATCH.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'quiz.manage')

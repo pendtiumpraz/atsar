@@ -1,9 +1,9 @@
 // Menu service — fetch the menu tree and the role↔menu access matrix.
 // See docs/BACKEND.md §5 (RBAC: menu.manage permission gates this).
 //
-// The matrix replacement runs in a single transaction; audit log records
-// the change. Frontend renders the tree and lets admins toggle visibility
-// per role.
+// The matrix replacement runs in a single `db.batch([...])` (Neon HTTP
+// doesn't support `db.transaction`); audit log records the change.
+// Frontend renders the tree and lets admins toggle visibility per role.
 
 import { and, asc, eq, isNull } from 'drizzle-orm'
 
@@ -70,7 +70,7 @@ export async function getRoleAccess(roleId: string): Promise<Set<string>> {
 
 /**
  * Replace the full menu-access matrix for one role. Wipes and re-inserts
- * the rows for that role inside a transaction so the visible-menu list
+ * the rows for that role inside a `db.batch` so the visible-menu list
  * is never observed half-applied during a save.
  */
 export async function setRoleAccess(
@@ -80,18 +80,24 @@ export async function setRoleAccess(
 ): Promise<void> {
   const uniqueIds = Array.from(new Set(menuIds))
 
-  await db.transaction(async (tx) => {
-    await tx.delete(roleMenuAccess).where(eq(roleMenuAccess.roleId, roleId))
-    if (uniqueIds.length > 0) {
-      await tx.insert(roleMenuAccess).values(
+  // Neon HTTP driver doesn't support `db.transaction`. We model the same
+  // "delete + insert" atomically with `db.batch` (Neon ships these as a
+  // single multi-statement request). If `uniqueIds` is empty we still need
+  // the delete, so issue it on its own.
+  if (uniqueIds.length > 0) {
+    await db.batch([
+      db.delete(roleMenuAccess).where(eq(roleMenuAccess.roleId, roleId)),
+      db.insert(roleMenuAccess).values(
         uniqueIds.map((menuItemId) => ({
           roleId,
           menuItemId,
           canView: true,
         })),
-      )
-    }
-  })
+      ),
+    ])
+  } else {
+    await db.delete(roleMenuAccess).where(eq(roleMenuAccess.roleId, roleId))
+  }
 
   await auditLog.write({
     actorId,

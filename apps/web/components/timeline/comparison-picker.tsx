@@ -6,12 +6,15 @@
 //     `?ids=a,b,c` so deep-linking works (and the server `/timeline`
 //     page can SSR the initial render).
 //   - Cascading: after a sahabat is picked, the tabi'in dropdown is
-//     filtered to those whose `birth_date_ah > selectedRef.death_date_ah`
+//     filtered to those whose `birthDateAh > selectedRef.deathDateAh`
 //     (i.e. lived after the reference figure died).  Same idea for
 //     tabi'ut tabi'in after a tabi'in pick.
 //   - Lazy fetch: each list comes from `figuresApi.list({ category })`
 //     via TanStack Query — fetches are memoised so flipping between
 //     dropdowns doesn't refetch.
+//
+// Field naming: the API serialises Drizzle rows directly, so keys are
+// camelCase (`nameFullId`, `birthDateAh`, …) — never snake_case.
 
 'use client'
 
@@ -27,11 +30,11 @@ const MAX_FIGURES = 5
 type ApiFigure = {
   id: string
   slug: string
-  name_full_id?: string | null
-  name_full_ar?: string | null
+  nameFullId?: string | null
+  nameFullAr?: string | null
   gender?: 'male' | 'female' | null
-  birth_date_ah?: number | null
-  death_date_ah?: number | null
+  birthDateAh?: number | null
+  deathDateAh?: number | null
 }
 
 export interface ComparisonPickerProps {
@@ -119,7 +122,7 @@ export function ComparisonPicker({ initialIds = [], onChange }: ComparisonPicker
   const referenceDeathAh = useMemo<number | null>(() => {
     for (let i = selectedIds.length - 1; i >= 0; i -= 1) {
       const f = byId.get(selectedIds[i] as string)
-      if (f && typeof f.death_date_ah === 'number') return f.death_date_ah
+      if (f && typeof f.deathDateAh === 'number') return f.deathDateAh
     }
     return null
   }, [selectedIds, byId])
@@ -128,7 +131,7 @@ export function ComparisonPicker({ initialIds = [], onChange }: ComparisonPicker
     const rows = tabiin.data?.rows ?? []
     if (referenceDeathAh === null) return rows
     return rows.filter(
-      (f) => typeof f.birth_date_ah === 'number' && f.birth_date_ah > referenceDeathAh,
+      (f) => typeof f.birthDateAh === 'number' && f.birthDateAh > referenceDeathAh,
     )
   }, [tabiin.data, referenceDeathAh])
 
@@ -136,7 +139,7 @@ export function ComparisonPicker({ initialIds = [], onChange }: ComparisonPicker
     const rows = tabiutTabiin.data?.rows ?? []
     if (referenceDeathAh === null) return rows
     return rows.filter(
-      (f) => typeof f.birth_date_ah === 'number' && f.birth_date_ah > referenceDeathAh,
+      (f) => typeof f.birthDateAh === 'number' && f.birthDateAh > referenceDeathAh,
     )
   }, [tabiutTabiin.data, referenceDeathAh])
 
@@ -177,7 +180,7 @@ export function ComparisonPicker({ initialIds = [], onChange }: ComparisonPicker
         ) : null}
         {selectedIds.map((id) => {
           const f = byId.get(id)
-          const label = f ? f.name_full_id || f.name_full_ar || f.slug : id
+          const label = f ? f.nameFullId || f.nameFullAr || f.slug : id
           return (
             <li
               key={id}
@@ -260,8 +263,8 @@ function CategorySelect({
           .filter((f) => !exclude.has(f.id))
           .map((f) => (
             <option key={f.id} value={f.id}>
-              {f.name_full_id || f.name_full_ar || f.slug}
-              {typeof f.death_date_ah === 'number' ? ` (w. ${f.death_date_ah}H)` : ''}
+              {f.nameFullId || f.nameFullAr || f.slug}
+              {typeof f.deathDateAh === 'number' ? ` (w. ${f.deathDateAh}H)` : ''}
             </option>
           ))}
       </select>

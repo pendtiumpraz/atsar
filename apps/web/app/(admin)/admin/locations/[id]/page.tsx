@@ -9,11 +9,15 @@
 // the data fetching (it already needs TanStack Query for cache invalidation
 // across the table view).  No server-side fetch here — saves a round-trip
 // and avoids duplicating the locationService output shape.
+//
+// `<LocationDetailActions />` adds the "Hapus" button + back-link sections
+// (figures/battles that reference this location) once we have the row id.
 
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 import { LocationForm } from '@/components/admin/locations/location-form'
+import { LocationDetailActions } from '@/components/admin/locations/location-detail-actions'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -37,17 +41,22 @@ export default async function LocationDetailPage({ params }: PageProps) {
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali ke daftar lokasi
         </Link>
-        <h1
-          className="text-2xl font-semibold text-[rgb(var(--text))]"
-          style={{ fontFamily: 'var(--font-display-latin)' }}
-        >
-          {isNew ? 'Tambah Lokasi' : 'Edit Lokasi'}
-        </h1>
-        <p className="text-sm text-[rgb(var(--text-muted))]">
-          {isNew
-            ? 'Isi metadata lokasi lalu klik peta untuk menentukan titik koordinat.'
-            : 'Perbarui metadata atau geser pin di peta untuk memindahkan koordinat.'}
-        </p>
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h1
+              className="text-2xl font-semibold text-[rgb(var(--text))]"
+              style={{ fontFamily: 'var(--font-display-latin)' }}
+            >
+              {isNew ? 'Tambah Lokasi' : 'Edit Lokasi'}
+            </h1>
+            <p className="text-sm text-[rgb(var(--text-muted))]">
+              {isNew
+                ? 'Isi metadata lokasi lalu klik peta untuk menentukan titik koordinat.'
+                : 'Perbarui metadata atau geser pin di peta untuk memindahkan koordinat.'}
+            </p>
+          </div>
+          {!isNew ? <LocationDetailActions locationId={id} /> : null}
+        </div>
       </header>
 
       <LocationForm locationId={isNew ? null : id} />

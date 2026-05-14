@@ -9,6 +9,7 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import {
   BookOpen,
@@ -17,6 +18,7 @@ import {
   Library,
   Sparkles,
   Star,
+  Trash2,
   Users,
   UserCircle2,
 } from 'lucide-react'
@@ -75,9 +77,11 @@ function resolveActiveTabId(category: string, gender: string): string {
 
 export interface FigureCategoryTabsProps {
   className?: string
+  /** Render the admin-only "Sampah" pill linking to /admin/trash/figures. */
+  showTrash?: boolean
 }
 
-export function FigureCategoryTabs({ className }: FigureCategoryTabsProps) {
+export function FigureCategoryTabs({ className, showTrash = false }: FigureCategoryTabsProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -129,6 +133,22 @@ export function FigureCategoryTabs({ className }: FigureCategoryTabsProps) {
           </button>
         )
       })}
+
+      {showTrash && (
+        <Link
+          href="/admin/trash/figures"
+          className={cn(
+            'ml-auto inline-flex shrink-0 snap-end items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors',
+            pathname?.startsWith('/admin/trash')
+              ? 'border-[rgb(var(--danger))] bg-[rgb(var(--danger))]/10 text-[rgb(var(--danger))]'
+              : 'border-[rgb(var(--border))] bg-[rgb(var(--surface))] text-[rgb(var(--text-muted))] hover:border-[rgb(var(--danger))] hover:text-[rgb(var(--danger))]',
+          )}
+          title="Tokoh yang dihapus (admin)"
+        >
+          <Trash2 className="h-4 w-4 shrink-0" />
+          <span className="whitespace-nowrap">Sampah</span>
+        </Link>
+      )}
     </nav>
   )
 }

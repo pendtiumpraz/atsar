@@ -10,6 +10,8 @@ type MenuSeed = {
   path?: string
   displayOrder: number
   requiredPermission?: string
+  /** Defaults to true. Set false for hidden / archived menu entries. */
+  isActive?: boolean
   children?: MenuSeed[]
 }
 
@@ -62,6 +64,11 @@ const MENU: MenuSeed[] = [
   { slug: 'admin-payments', labelId: 'Pembayaran', icon: 'Wallet', path: '/admin/payments', displayOrder: 245, requiredPermission: 'subscriptions.view' },
   { slug: 'admin-subs', labelId: 'Subscriptions', icon: 'CreditCard', path: '/admin/subscriptions', displayOrder: 250, requiredPermission: 'subscriptions.view' },
   { slug: 'admin-audit', labelId: 'Audit Log', icon: 'ScrollText', path: '/admin/audit-logs', displayOrder: 260, requiredPermission: 'audit_log.view' },
+  // "Trash" entries are intentionally inactive — the figures-trash UI now
+  // lives as an admin-only "Sampah" pill inside <FigureCategoryTabs> on
+  // /figures. Battles-trash is accessed from /battles in the same way once
+  // that tab UI lands. Rows kept so admins can re-enable from the menu
+  // admin if they want them back in the sidebar.
   {
     slug: 'admin-trash',
     labelId: 'Trash',
@@ -69,9 +76,10 @@ const MENU: MenuSeed[] = [
     path: '/admin/trash',
     displayOrder: 270,
     requiredPermission: 'trash.view',
+    isActive: false,
     children: [
-      { slug: 'admin-trash-figures', labelId: 'Sampah Tokoh', icon: 'Trash2', path: '/admin/trash/figures', displayOrder: 1 },
-      { slug: 'admin-trash-battles', labelId: 'Sampah Peristiwa', icon: 'Trash2', path: '/admin/trash/battles', displayOrder: 2 },
+      { slug: 'admin-trash-figures', labelId: 'Sampah Tokoh', icon: 'Trash2', path: '/admin/trash/figures', displayOrder: 1, isActive: false },
+      { slug: 'admin-trash-battles', labelId: 'Sampah Peristiwa', icon: 'Trash2', path: '/admin/trash/battles', displayOrder: 2, isActive: false },
     ],
   },
   // ─── Settings ─────────────────────────────────────────────
@@ -93,6 +101,7 @@ export async function seed004MenuItems() {
         path: parent.path,
         displayOrder: parent.displayOrder,
         requiredPermission: parent.requiredPermission,
+        isActive: parent.isActive ?? true,
       })
       .onConflictDoNothing()
       .returning()
@@ -112,6 +121,7 @@ export async function seed004MenuItems() {
               path: child.path,
               displayOrder: child.displayOrder,
               requiredPermission: child.requiredPermission,
+              isActive: child.isActive ?? true,
             })
             .onConflictDoNothing()
             .returning()

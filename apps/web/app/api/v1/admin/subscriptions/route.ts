@@ -11,6 +11,7 @@ import { listAll } from '@/lib/server/services/subscription.service'
 
 const querySchema = z.object({
   status: z.enum(['trial', 'active', 'expired', 'cancelled']).optional(),
+  userId: z.string().uuid().optional(),
   page: z.coerce.number().int().positive().default(1),
   perPage: z.coerce.number().int().positive().max(200).default(50),
 })

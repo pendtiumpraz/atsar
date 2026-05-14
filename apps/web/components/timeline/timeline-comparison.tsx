@@ -35,11 +35,14 @@ import 'vis-timeline/styles/vis-timeline-graph2d.min.css'
 export interface ComparisonFigure {
   id: string
   slug: string
-  name_full_id?: string | null
-  name_full_ar?: string | null
+  // Field naming: API serialises Drizzle rows verbatim — camelCase, never
+  // snake_case.  Sticking snake_case here would silently leave the timeline
+  // empty because every per-figure read below would be `undefined`.
+  nameFullId?: string | null
+  nameFullAr?: string | null
   gender?: 'male' | 'female' | null
-  birth_date_ah?: number | null
-  death_date_ah?: number | null
+  birthDateAh?: number | null
+  deathDateAh?: number | null
   /**
    * Optional point markers (e.g. bi'tsah, masuk Islam).  Each event must
    * carry an AH year — we project to a JS Date in the same way as the
@@ -75,7 +78,7 @@ function dateToAhLabel(date: Date): number {
 }
 
 function figureLabel(f: ComparisonFigure): string {
-  return f.name_full_id || f.name_full_ar || f.slug
+  return f.nameFullId || f.nameFullAr || f.slug
 }
 
 export function TimelineComparison({ figures, mode }: TimelineComparisonProps) {
@@ -109,8 +112,8 @@ export function TimelineComparison({ figures, mode }: TimelineComparisonProps) {
       // Items: one range bar per figure + optional event points.
       const items: Array<Record<string, unknown>> = []
       for (const f of figures) {
-        const birth = typeof f.birth_date_ah === 'number' ? f.birth_date_ah : null
-        const death = typeof f.death_date_ah === 'number' ? f.death_date_ah : null
+        const birth = typeof f.birthDateAh === 'number' ? f.birthDateAh : null
+        const death = typeof f.deathDateAh === 'number' ? f.deathDateAh : null
         if (birth === null && death === null) continue
 
         const startAh = birth ?? (death !== null ? death - 60 : 0)

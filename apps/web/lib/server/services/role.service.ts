@@ -214,8 +214,9 @@ export async function softDelete(id: string, actorId: string | null): Promise<vo
 
 /**
  * Replace the full permission set for a role. Runs `delete + insert` in a
- * single transaction so the matrix is never observed half-applied.
- * Invalidates permission cache for every user holding this role.
+ * single `db.batch` (Neon HTTP doesn't support `db.transaction`) so the
+ * matrix is never observed half-applied. Invalidates permission cache for
+ * every user holding this role.
  */
 export async function setPermissions(
   roleId: string,
@@ -228,18 +229,24 @@ export async function setPermissions(
   // De-dupe input to avoid PK violation on the composite (roleId, permissionId).
   const uniqueIds = Array.from(new Set(permissionIds))
 
-  await db.transaction(async (tx) => {
-    await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId))
-    if (uniqueIds.length > 0) {
-      await tx.insert(rolePermissions).values(
+  // Neon HTTP driver doesn't support `db.transaction`. We model the same
+  // "delete + insert" atomically with `db.batch` (Neon ships these as a
+  // single multi-statement request). If `uniqueIds` is empty we still need
+  // the delete, so issue it on its own.
+  if (uniqueIds.length > 0) {
+    await db.batch([
+      db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId)),
+      db.insert(rolePermissions).values(
         uniqueIds.map((permissionId) => ({
           roleId,
           permissionId,
           grantedBy: actorId ?? null,
         })),
-      )
-    }
-  })
+      ),
+    ])
+  } else {
+    await db.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId))
+  }
 
   await auditLog.write({
     actorId,

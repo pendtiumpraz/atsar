@@ -226,8 +226,15 @@ export const locationsApi = {
 export const subscriptionsApi = {
   me: () => api.get<any>('/subscriptions/me'),
   admin: {
-    list: (params: { page?: number; perPage?: number; tier?: string } = {}) =>
-      apiPaginated<any>(`/admin/subscriptions${buildQuery(params)}`),
+    list: (
+      params: {
+        page?: number
+        perPage?: number
+        tier?: string
+        userId?: string
+        status?: string
+      } = {},
+    ) => apiPaginated<any>(`/admin/subscriptions${buildQuery(params)}`),
     activate: (id: string, body: Record<string, unknown> = {}) =>
       api.post<any>(`/admin/subscriptions/${id}/activate`, body),
   },
@@ -236,8 +243,14 @@ export const subscriptionsApi = {
 // ─── Payments (admin) ──────────────────────────────────────────────────
 export const paymentsApi = {
   admin: {
-    list: (params: { page?: number; perPage?: number; status?: string } = {}) =>
-      apiPaginated<any>(`/admin/payments${buildQuery(params)}`),
+    list: (
+      params: {
+        page?: number
+        perPage?: number
+        status?: string
+        userId?: string
+      } = {},
+    ) => apiPaginated<any>(`/admin/payments${buildQuery(params)}`),
     confirm: (id: string) => api.post<any>(`/admin/payments/${id}/confirm`, {}),
     reject: (id: string, reason?: string) =>
       api.post<any>(`/admin/payments/${id}/reject`, { reason }),
@@ -286,8 +299,18 @@ export const adminApi = {
     setAccess: (body: Record<string, unknown>) => api.put<any>('/admin/menus/access', body),
   },
   auditLogs: {
-    list: (params: { page?: number; perPage?: number; actorId?: string; action?: string } = {}) =>
-      apiPaginated<any>(`/admin/audit-logs${buildQuery(params)}`),
+    list: (
+      params: {
+        page?: number
+        perPage?: number
+        actorId?: string
+        action?: string
+        resourceType?: string
+        resourceId?: string
+        from?: string
+        to?: string
+      } = {},
+    ) => apiPaginated<any>(`/admin/audit-logs${buildQuery(params)}`),
     get: (id: string) => api.get<any>(`/admin/audit-logs/${id}`),
   },
   fonts: {

@@ -1,5 +1,6 @@
 // GET    /api/v1/admin/roles/[id]
-// PUT    /api/v1/admin/roles/[id]
+// PATCH  /api/v1/admin/roles/[id]   (partial)
+// PUT    /api/v1/admin/roles/[id]   (alias for PATCH; legacy callers)
 // DELETE /api/v1/admin/roles/[id]   (soft-delete; refuses system roles)
 // Permission: `roles.manage`.
 
@@ -33,7 +34,7 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(row)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   await requirePermission(req, 'roles.manage')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
@@ -41,6 +42,9 @@ export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const row = await roleService.update(id, input, null)
   return ok(row)
 })
+
+// Legacy PUT alias — FE client uses PATCH.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   await requirePermission(req, 'roles.manage')

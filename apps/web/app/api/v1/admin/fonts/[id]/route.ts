@@ -1,7 +1,8 @@
 // GET    /api/v1/admin/fonts/[id]
-// PUT    /api/v1/admin/fonts/[id]
+// PATCH  /api/v1/admin/fonts/[id]   (partial)
+// PUT    /api/v1/admin/fonts/[id]   (alias for PATCH; legacy callers like fonts-table)
 // DELETE /api/v1/admin/fonts/[id]   (soft-delete; refuses if assigned)
-// Permissions: GET → `fonts.view`, PUT/DELETE → `fonts.manage`.
+// Permissions: GET → `fonts.view`, PATCH/PUT/DELETE → `fonts.manage`.
 
 import { z } from 'zod'
 
@@ -44,13 +45,16 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(row)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'fonts.manage')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
   const row = await fontService.update(id, input, userId)
   return ok(row)
 })
+
+// Legacy PUT alias — fonts-table.tsx still sends PUT for the activate toggle.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'fonts.manage')

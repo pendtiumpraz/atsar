@@ -1,5 +1,6 @@
 // GET    /api/v1/figures/:slug   → detail with relations + locations
-// PUT    /api/v1/figures/:slug   → update
+// PATCH  /api/v1/figures/:slug   → update (partial)
+// PUT    /api/v1/figures/:slug   → alias for PATCH (legacy callers)
 // DELETE /api/v1/figures/:slug   → soft delete (cascade to relations/locations)
 //
 // See docs/BACKEND.md §4 + docs/WIREFRAMES.md §6.
@@ -18,13 +19,17 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
   return ok(figure)
 })
 
-export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
+export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'figures.update')
   const { slug } = await ctx.params
   const body = await validateBody(req, updateFigureSchema)
   const updated = await figureService.update(slug, body, userId)
   return ok(updated)
 })
+
+// Legacy PUT alias — the FE client uses PATCH, but some older callers still
+// send PUT.  Delegating keeps the surface backwards-compatible.
+export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
   const { userId } = await requirePermission(req, 'figures.delete')

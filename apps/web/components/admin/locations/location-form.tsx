@@ -57,6 +57,8 @@ interface LocationRow {
   modernName: string | null
   countryCode: string | null
   region: string | null
+  elevationMeters: number | null
+  historicalPeriod: string[] | null
   descriptionAr: string | null
   descriptionId: string | null
   coordinates: { type: 'Point'; coordinates: [number, number] } | null
@@ -79,6 +81,11 @@ const formSchema = z.object({
     .optional()
     .or(z.literal('')),
   region: z.string().trim().max(64).optional(),
+  // `elevationMeters` arrives as a string from the input and is coerced to
+  // number | null at submit. Empty string is kept as a sentinel for "unset".
+  elevationMeters: z.string().trim().max(10).optional(),
+  // Comma-separated list of historical-period tags, e.g. "khulafa, umayyah".
+  historicalPeriod: z.string().trim().max(500).optional(),
   descriptionAr: z.string().max(8000).optional(),
   descriptionId: z.string().max(8000).optional(),
   lat: z.coerce.number().min(-90, 'Lat harus -90..90').max(90, 'Lat harus -90..90'),
@@ -97,6 +104,8 @@ const EMPTY_DEFAULTS: FormValues = {
   modernName: '',
   countryCode: '',
   region: '',
+  elevationMeters: '',
+  historicalPeriod: '',
   descriptionAr: '',
   descriptionId: '',
   // Default to Mekkah — same anchor as the public map.
@@ -142,6 +151,11 @@ export function LocationForm({ locationId }: LocationFormProps) {
       modernName: row.modernName ?? '',
       countryCode: row.countryCode ?? '',
       region: row.region ?? '',
+      elevationMeters:
+        typeof row.elevationMeters === 'number' ? String(row.elevationMeters) : '',
+      historicalPeriod: Array.isArray(row.historicalPeriod)
+        ? row.historicalPeriod.join(', ')
+        : '',
       descriptionAr: row.descriptionAr ?? '',
       descriptionId: row.descriptionId ?? '',
       lat: coords ? coords[1] : EMPTY_DEFAULTS.lat,
@@ -176,6 +190,22 @@ export function LocationForm({ locationId }: LocationFormProps) {
     if (!parsed.success) return
     const data = parsed.data
 
+    // Normalise elevation: "" → null, otherwise parseInt (server route
+    // also coerces, but normalising here gives a cleaner audit diff).
+    let elevation: number | null = null
+    if (data.elevationMeters && data.elevationMeters.trim().length > 0) {
+      const parsed = Number(data.elevationMeters)
+      elevation = Number.isFinite(parsed) ? Math.trunc(parsed) : null
+    }
+
+    // Comma-separated tags → string[]. Empty → null.
+    const historicalPeriod: string[] | null = data.historicalPeriod
+      ? data.historicalPeriod
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+      : null
+
     const body = {
       slug: data.slug,
       nameAr: data.nameAr,
@@ -183,6 +213,8 @@ export function LocationForm({ locationId }: LocationFormProps) {
       modernName: data.modernName ? data.modernName : null,
       countryCode: data.countryCode ? data.countryCode.toUpperCase() : null,
       region: data.region ? data.region : null,
+      elevationMeters: elevation,
+      historicalPeriod: historicalPeriod && historicalPeriod.length > 0 ? historicalPeriod : null,
       descriptionAr: data.descriptionAr ? data.descriptionAr : null,
       descriptionId: data.descriptionId ? data.descriptionId : null,
       lat: data.lat,
@@ -312,6 +344,36 @@ export function LocationForm({ locationId }: LocationFormProps) {
           <div className="space-y-2">
             <Label htmlFor="region">Wilayah</Label>
             <Input id="region" placeholder="Hijaz" {...register('region')} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="elevationMeters">Elevasi (meter)</Label>
+            <Input
+              id="elevationMeters"
+              type="number"
+              inputMode="numeric"
+              placeholder="mis. 277"
+              aria-invalid={errors.elevationMeters ? 'true' : 'false'}
+              {...register('elevationMeters')}
+            />
+            {errors.elevationMeters && (
+              <p className="text-xs" style={{ color: 'rgb(var(--danger))' }}>
+                {errors.elevationMeters.message}
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="historicalPeriod">Periode Historis</Label>
+            <Input
+              id="historicalPeriod"
+              placeholder="mis. khulafa, umayyah, abbasiyah"
+              {...register('historicalPeriod')}
+            />
+            <p className="text-xs text-[rgb(var(--text-muted))]">
+              Pisahkan dengan koma. Kosongkan jika tidak relevan.
+            </p>
           </div>
         </div>
 

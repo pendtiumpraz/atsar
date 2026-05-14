@@ -214,37 +214,41 @@ export async function invite(
   const tokenHash = hashToken(rawToken)
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7) // 7 days
 
-  const result = await db.transaction(async (tx) => {
-    const [user] = await tx
-      .insert(users)
-      .values({
-        email: input.email,
-        fullName: input.fullName,
-        displayName: input.fullName,
-        locale: 'id',
-        createdBy: actorId ?? null,
-        updatedBy: actorId ?? null,
-      })
-      .returning()
+  // Neon HTTP driver doesn't support `db.transaction` — insert the user
+  // first so we have its id, then batch the dependent FK rows. `db.batch`
+  // gives single-round-trip atomicity for the dependent inserts; if the
+  // batch fails the user row is left dangling but the email-verification
+  // token never lands, so the user can't sign in regardless.
+  const [user] = await db
+    .insert(users)
+    .values({
+      email: input.email,
+      fullName: input.fullName,
+      displayName: input.fullName,
+      locale: 'id',
+      createdBy: actorId ?? null,
+      updatedBy: actorId ?? null,
+    })
+    .returning()
 
-    if (!user) {
-      throw new ApiError('INTERNAL_ERROR', 'Gagal membuat user')
-    }
+  if (!user) {
+    throw new ApiError('INTERNAL_ERROR', 'Gagal membuat user')
+  }
 
-    await tx.insert(userRoles).values({
+  await db.batch([
+    db.insert(userRoles).values({
       userId: user.id,
       roleId: role.id,
       assignedBy: actorId ?? null,
-    })
-
-    await tx.insert(emailVerificationTokens).values({
+    }),
+    db.insert(emailVerificationTokens).values({
       userId: user.id,
       tokenHash,
       expiresAt,
-    })
+    }),
+  ])
 
-    return user
-  })
+  const result = user
 
   await auditLog.write({
     actorId,
@@ -333,8 +337,9 @@ export async function update(
 }
 
 /**
- * Replace the user's role assignments transactionally. Invalidates the
- * effective-permission cache for that user.
+ * Replace the user's role assignments atomically via `db.batch` (Neon HTTP
+ * doesn't support `db.transaction`). Invalidates the effective-permission
+ * cache for that user.
  */
 export async function setRoles(
   userId: string,
@@ -363,18 +368,24 @@ export async function setRoles(
     }
   }
 
-  await db.transaction(async (tx) => {
-    await tx.delete(userRoles).where(eq(userRoles.userId, userId))
-    if (uniqueIds.length > 0) {
-      await tx.insert(userRoles).values(
+  // Neon HTTP driver doesn't support `db.transaction`. We model the same
+  // "delete + insert" atomically with `db.batch` (Neon ships these as a
+  // single multi-statement request). If `uniqueIds` is empty we still need
+  // the delete, so issue it on its own.
+  if (uniqueIds.length > 0) {
+    await db.batch([
+      db.delete(userRoles).where(eq(userRoles.userId, userId)),
+      db.insert(userRoles).values(
         uniqueIds.map((roleId) => ({
           userId,
           roleId,
           assignedBy: actorId ?? null,
         })),
-      )
-    }
-  })
+      ),
+    ])
+  } else {
+    await db.delete(userRoles).where(eq(userRoles.userId, userId))
+  }
 
   await auditLog.write({
     actorId,

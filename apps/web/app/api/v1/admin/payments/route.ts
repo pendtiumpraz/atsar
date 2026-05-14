@@ -13,7 +13,8 @@ import { auth } from '@/lib/server/auth'
 import { requirePermission } from '@/lib/server/rbac'
 
 const querySchema = z.object({
-  status: z.enum(['pending', 'confirmed', 'rejected']).default('pending'),
+  status: z.enum(['pending', 'confirmed', 'rejected']).optional(),
+  userId: z.string().uuid().optional(),
   page: z.coerce.number().int().positive().default(1),
   perPage: z.coerce.number().int().positive().max(200).default(50),
 })
@@ -28,7 +29,13 @@ export const GET = withErrorHandling(async (req) => {
   const url = new URL(req.url)
   const q = validateQuery(url.searchParams, querySchema)
 
-  const filters: SQL[] = [isNull(payments.deletedAt), eq(payments.status, q.status)]
+  // Status filter: default to `pending` for the worklist view, but allow
+  // callers to widen by passing `?userId=...` (typically from the user
+  // detail page, where we want every payment regardless of state).
+  const filters: SQL[] = [isNull(payments.deletedAt)]
+  if (q.status) filters.push(eq(payments.status, q.status))
+  else if (!q.userId) filters.push(eq(payments.status, 'pending'))
+  if (q.userId) filters.push(eq(payments.userId, q.userId))
   const whereExpr = and(...filters)
   const offset = (q.page - 1) * q.perPage
 
