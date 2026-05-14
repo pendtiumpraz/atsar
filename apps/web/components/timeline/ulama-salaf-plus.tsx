@@ -78,6 +78,17 @@ function ahYearToDate(ah: number): Date {
   return new Date(Date.UTC(ce, 0, 1))
 }
 
+/**
+ * Inverse: best-effort CE→AH for axis tick labels. Mirrors the formula in
+ * `timeline-comparison.tsx` so both views share the same convention
+ * ("60 H / 680 M"). Year-only granularity is sufficient — figure data
+ * doesn't carry month/day precision.
+ */
+function dateToAhLabel(date: Date): number {
+  const ce = date.getUTCFullYear()
+  return Math.round(((ce - 622) * 365.2425) / 354.367)
+}
+
 function figureLabel(f: UlamaFigure): string {
   return f.nameFullId || f.nameFullAr || f.slug
 }
@@ -192,6 +203,19 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
 
       const groups = GENERATION_GROUPS.map((g) => ({ id: g.id, content: g.label }))
 
+      // Axis formatter: ulama view always shows BOTH calendars on each
+      // tick ("60 H / 680 M"). Even though the page hard-codes mode='h',
+      // the dual-calendar label is the canonical UX here — viewers
+      // cross-reference Hijri generations with Masehi history all the
+      // time. Strict 'm' mode is preserved as an escape hatch in case a
+      // future page wants single-calendar.
+      const yearFormatter = (date: Date) => {
+        const ah = dateToAhLabel(date)
+        const ce = date.getUTCFullYear()
+        if (mode === 'm') return `${ce} M`
+        return `${ah} H / ${ce} M`
+      }
+
       const options: Record<string, unknown> = {
         stack: true,
         showCurrentTime: false,
@@ -200,6 +224,13 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
         horizontalScroll: true,
         orientation: { axis: 'top', item: 'top' },
         margin: { item: 6, axis: 12 },
+        format: {
+          // String fallback used until `setOptions` swaps in the function
+          // variant below — keeps the axis readable if the typed override
+          // throws on older vis-timeline builds.
+          minorLabels: { year: 'yyyy' },
+          majorLabels: { year: '' },
+        },
       }
 
       if (timelineRef.current) {
@@ -218,6 +249,19 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
         options,
       )
       timelineRef.current = timeline
+
+      // Custom axis tick formatting — vis-timeline supports
+      // `format.minorLabels` as a function, but the typed API is loose,
+      // so we use `setOptions` for the function variant.
+      try {
+        timeline.setOptions({
+          format: {
+            minorLabels: (date: Date) => yearFormatter(date),
+          },
+        })
+      } catch {
+        /* tolerated — older API just keeps yyyy label */
+      }
     })()
 
     return () => {
@@ -265,6 +309,10 @@ export function UlamaSalafPlus({ mode = 'h' }: UlamaSalafPlusProps) {
           <div
             ref={containerRef}
             className="min-h-[28rem] w-full text-sm text-[rgb(var(--text))]"
+            // Inline height matches the comparison view: vis-timeline reads
+            // offsetHeight synchronously in its constructor, before Tailwind
+            // classes resolve on first paint.
+            style={{ minHeight: '28rem', height: '28rem' }}
             aria-label="Timeline ulama salaf"
           />
         )}

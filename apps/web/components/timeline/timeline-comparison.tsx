@@ -233,6 +233,12 @@ export function TimelineComparison({ figures, mode }: TimelineComparisonProps) {
       <div
         ref={containerRef}
         className="min-h-[24rem] w-full text-sm text-[rgb(var(--text))]"
+        // Inline height is intentional: vis-timeline reads
+        // `el.offsetHeight` synchronously inside its constructor, before
+        // the Tailwind `min-h-[24rem]` class has had a chance to apply on
+        // first paint. Without a measurable height the canvas mounts at
+        // 0px and never renders any axis/bars (the bug users saw).
+        style={{ minHeight: '24rem', height: '24rem' }}
         aria-label="Timeline komparasi tokoh"
       />
     </div>
@@ -270,12 +276,21 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
   // We can't fetch by id directly with the current endpoint surface — but
   // `figuresApi.list` returns all rows so we can match client-side.  Cache
   // is shared with the picker (same query key).
+  //
+  // IMPORTANT: load *all six* canonical figure categories. The picker only
+  // writes ids from sahabat/tabiin/tabiut_tabiin, but a viewer can deep-link
+  // any id through `?ids=`. If a passed id belongs to e.g.
+  // `shalih_pasca_rasul` (modern ulama) or `shalih_pre_rasul` (pre-Islamic
+  // righteous), it would otherwise miss every lookup below and silently
+  // produce an empty `figures` array → canvas renders the empty state.
   const cats = useQueries({
     queries: [
       { queryKey: ['figures', { category: 'sahabat', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'sahabat', perPage: 200 }), staleTime: 5 * 60 * 1000 },
       { queryKey: ['figures', { category: 'tabiin', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'tabiin', perPage: 200 }), staleTime: 5 * 60 * 1000 },
       { queryKey: ['figures', { category: 'tabiut_tabiin', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'tabiut_tabiin', perPage: 200 }), staleTime: 5 * 60 * 1000 },
       { queryKey: ['figures', { category: 'nabi', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'nabi', perPage: 200 }), staleTime: 5 * 60 * 1000 },
+      { queryKey: ['figures', { category: 'shalih_pre_rasul', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'shalih_pre_rasul', perPage: 200 }), staleTime: 5 * 60 * 1000 },
+      { queryKey: ['figures', { category: 'shalih_pasca_rasul', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'shalih_pasca_rasul', perPage: 200 }), staleTime: 5 * 60 * 1000 },
     ],
   })
 
@@ -292,7 +307,19 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
     if (ids.length === 0) return []
     const byId = new Map<string, ComparisonFigure>()
     for (const f of allRows) byId.set(f.id, f)
-    return ids.map((id) => byId.get(id)).filter((x): x is ComparisonFigure => x !== undefined)
+    return ids
+      .map((id) => {
+        const hit = byId.get(id)
+        if (!hit && allRows.length > 0) {
+          // All category queries have responded with at least one row but
+          // the id is still missing — surface this so Vercel runtime logs
+          // pick up silent gaps (e.g. id belongs to a category not loaded
+          // here, or row was soft-deleted).
+          console.error('[timeline] figure lookup miss', id)
+        }
+        return hit
+      })
+      .filter((x): x is ComparisonFigure => x !== undefined)
   }, [ids, allRows])
 
   // Avoid hydration mismatch — empty state on initial render is fine since
