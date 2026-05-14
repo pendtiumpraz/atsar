@@ -12,6 +12,11 @@ import {
   Cpu,
   Type as TypeIcon,
   ShieldCheck,
+  Shield,
+  ListTree,
+  CreditCard,
+  MapPin,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -33,10 +38,28 @@ const ACTIONS: ReadonlyArray<QuickAction> = [
     description: 'Kelola pengguna, role, dan langganan.',
   },
   {
+    href: '/admin/roles',
+    label: 'Roles',
+    icon: Shield,
+    description: 'Atur role & permission.',
+  },
+  {
+    href: '/admin/menus',
+    label: 'Menus',
+    icon: ListTree,
+    description: 'Kelola item sidebar & akses menu per role.',
+  },
+  {
     href: '/admin/payments',
     label: 'Pembayaran',
     icon: Wallet,
     description: 'Konfirmasi pembayaran manual.',
+  },
+  {
+    href: '/admin/subscriptions',
+    label: 'Langganan',
+    icon: CreditCard,
+    description: 'Lihat & kelola langganan aktif.',
   },
   {
     href: '/admin/audit-logs',
@@ -57,10 +80,22 @@ const ACTIONS: ReadonlyArray<QuickAction> = [
     description: 'Kelola font Arab & Latin.',
   },
   {
+    href: '/admin/locations',
+    label: 'Lokasi',
+    icon: MapPin,
+    description: 'Kelola data lokasi & geografi.',
+  },
+  {
     href: '/admin/whitelist',
     label: 'Whitelist',
     icon: ShieldCheck,
     description: 'Kelola email whitelist akses.',
+  },
+  {
+    href: '/admin/trash',
+    label: 'Trash',
+    icon: Trash2,
+    description: 'Pulihkan item yang dihapus.',
   },
 ]
 

@@ -49,14 +49,31 @@ const MENU: MenuSeed[] = [
   // ─── Reviewer area ────────────────────────────────────────
   { slug: 'reviewer-queue', labelId: 'Review Queue', icon: 'ClipboardList', path: '/queue', displayOrder: 100, requiredPermission: 'figures.review' },
   // ─── Admin area ───────────────────────────────────────────
+  // Order: dashboard → ops (users, roles, menus) → infra (ai, fonts) → data
+  // (locations) → billing (payments, subs, whitelist) → audit / trash.
+  { slug: 'admin-dashboard', labelId: 'Admin Dashboard', icon: 'LayoutDashboard', path: '/admin/dashboard', displayOrder: 195 },
   { slug: 'admin-users', labelId: 'Users', icon: 'UsersRound', path: '/admin/users', displayOrder: 200, requiredPermission: 'users.view' },
   { slug: 'admin-roles', labelId: 'Roles & Menu', icon: 'Shield', path: '/admin/roles', displayOrder: 210, requiredPermission: 'roles.manage' },
+  { slug: 'admin-menus', labelId: 'Menus', icon: 'ListTree', path: '/admin/menus', displayOrder: 215, requiredPermission: 'roles.manage' },
   { slug: 'admin-ai', labelId: 'AI Providers', icon: 'Bot', path: '/admin/ai-providers', displayOrder: 220, requiredPermission: 'ai_providers.manage' },
   { slug: 'admin-fonts', labelId: 'Fonts', icon: 'Type', path: '/admin/fonts', displayOrder: 230, requiredPermission: 'fonts.manage' },
+  { slug: 'admin-locations', labelId: 'Lokasi', icon: 'MapPin', path: '/admin/locations', displayOrder: 235 },
   { slug: 'admin-whitelist', labelId: 'Whitelist Domain', icon: 'Globe', path: '/admin/whitelist', displayOrder: 240, requiredPermission: 'whitelist.manage' },
+  { slug: 'admin-payments', labelId: 'Pembayaran', icon: 'Wallet', path: '/admin/payments', displayOrder: 245, requiredPermission: 'subscriptions.view' },
   { slug: 'admin-subs', labelId: 'Subscriptions', icon: 'CreditCard', path: '/admin/subscriptions', displayOrder: 250, requiredPermission: 'subscriptions.view' },
   { slug: 'admin-audit', labelId: 'Audit Log', icon: 'ScrollText', path: '/admin/audit-logs', displayOrder: 260, requiredPermission: 'audit_log.view' },
-  { slug: 'admin-trash', labelId: 'Trash', icon: 'Trash2', path: '/admin/trash', displayOrder: 270, requiredPermission: 'trash.view' },
+  {
+    slug: 'admin-trash',
+    labelId: 'Trash',
+    icon: 'Trash2',
+    path: '/admin/trash',
+    displayOrder: 270,
+    requiredPermission: 'trash.view',
+    children: [
+      { slug: 'admin-trash-figures', labelId: 'Sampah Tokoh', icon: 'Trash2', path: '/admin/trash/figures', displayOrder: 1 },
+      { slug: 'admin-trash-battles', labelId: 'Sampah Peristiwa', icon: 'Trash2', path: '/admin/trash/battles', displayOrder: 2 },
+    ],
+  },
   // ─── Settings ─────────────────────────────────────────────
   { slug: 'settings', labelId: 'Settings', icon: 'Settings', path: '/settings', displayOrder: 900 },
   { slug: 'billing', labelId: 'Billing', icon: 'Wallet', path: '/billing', displayOrder: 910 },

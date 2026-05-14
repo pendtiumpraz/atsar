@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import { authClient } from '@/lib/auth-client'
+import { getMyRoleSlugs } from '@/lib/server/auth/get-role-slugs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,7 +32,11 @@ type LoginValues = z.infer<typeof loginSchema>
 export function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams.get('from') || '/dashboard'
+  // `from` is set by middleware on protected-route bounces; honour it
+  // verbatim. Otherwise we pick a target based on the user's role after the
+  // sign-in resolves (admin → /admin/dashboard, reviewer → /queue, else
+  // /dashboard).
+  const fromParam = searchParams.get('from')
 
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -45,14 +50,34 @@ export function LoginForm() {
     defaultValues: { email: '', password: '', rememberMe: false },
   })
 
+  /**
+   * Pick the post-login destination. Explicit `?from=` wins; otherwise we
+   * inspect the user's role slugs (resolved server-side after sign-in) and
+   * land each role on its natural home page.
+   */
+  async function resolveRedirect(): Promise<string> {
+    if (fromParam) return fromParam
+    try {
+      const slugs = await getMyRoleSlugs()
+      if (slugs.includes('admin')) return '/admin/dashboard'
+      if (slugs.includes('reviewer')) return '/queue'
+    } catch {
+      // Role lookup failures are non-fatal — fall through to /dashboard.
+    }
+    return '/dashboard'
+  }
+
   async function onSubmit(values: LoginValues) {
     setSubmitting(true)
     try {
+      // NOTE: we intentionally omit `callbackURL` here — better-auth only
+      // honours it for OAuth/magic-link flows, and even then we want to
+      // override the destination based on the resolved role. The push
+      // below handles the navigation after we know the user's roles.
       const result = await authClient.signIn.email({
         email: values.email,
         password: values.password,
         rememberMe: values.rememberMe ?? false,
-        callbackURL: redirectTo,
       })
 
       // better-auth returns `{ data, error }` (no throw on bad credentials)
@@ -62,8 +87,9 @@ export function LoginForm() {
         return
       }
 
+      const target = await resolveRedirect()
       toast.success('Berhasil masuk. Mengalihkan...')
-      router.push(redirectTo)
+      router.push(target)
       router.refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Terjadi kesalahan tak terduga.'

@@ -34,6 +34,29 @@ export interface MenuItem {
   children?: MenuItem[]
 }
 
+/** Shape of one row returned by `GET /api/v1/me/menu`. */
+interface ApiMenuRow {
+  id: string
+  slug: string
+  labelId: string
+  labelAr?: string | null
+  path: string | null
+  icon: string | null
+  parentId: string | null
+  displayOrder: number
+}
+
+/** Coerce a server menu row into the sidebar's `MenuItem` shape. */
+function toMenuItem(row: ApiMenuRow): MenuItem {
+  return {
+    slug: row.slug,
+    label: row.labelId,
+    ...(row.labelAr ? { labelAr: row.labelAr } : {}),
+    icon: row.icon ?? 'Circle',
+    path: row.path ?? '',
+  }
+}
+
 // ─── Fallback menu (seeded slugs) ────────────────────────────────────────
 // TODO: replace with `/api/v1/me/menu` once available.
 const FALLBACK_MENU: MenuItem[] = [
@@ -300,12 +323,18 @@ function useMenu(): MenuItem[] {
     let cancelled = false
     fetch('/api/v1/me/menu', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data) return
-        const fetched = Array.isArray(data) ? data : data?.items
-        if (Array.isArray(fetched) && fetched.length > 0) {
-          setItems(fetched as MenuItem[])
-        }
+      .then((payload) => {
+        if (cancelled || !payload) return
+        // Accept either the legacy bare-array shape or the standard
+        // `{ ok, data: [...] }` envelope so the sidebar keeps working
+        // through future response-shape changes.
+        const raw: unknown = Array.isArray(payload)
+          ? payload
+          : (payload as { data?: unknown; items?: unknown }).data ??
+            (payload as { items?: unknown }).items
+        if (!Array.isArray(raw) || raw.length === 0) return
+        const mapped = (raw as ApiMenuRow[]).map(toMenuItem)
+        setItems(mapped)
       })
       .catch(() => {
         /* keep fallback */
