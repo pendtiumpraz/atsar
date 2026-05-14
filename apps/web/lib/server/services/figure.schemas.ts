@@ -63,14 +63,14 @@ export const listFiguresQuerySchema = z.object({
   category: z.string().trim().min(1).max(64).optional(), // category slug
   gender: z.enum(genderValues).optional(),
   page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(20),
+  perPage: z.coerce.number().int().min(1).max(250).default(20),
 })
 export type ListFiguresQuery = z.infer<typeof listFiguresQuerySchema>
 
 // ── Trash list query ──────────────────────────────────────────────────
 export const listTrashQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(20),
+  perPage: z.coerce.number().int().min(1).max(250).default(20),
 })
 export type ListTrashQuery = z.infer<typeof listTrashQuerySchema>
 

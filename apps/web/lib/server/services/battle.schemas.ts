@@ -39,14 +39,14 @@ export const listBattlesQuerySchema = z.object({
   toAh: z.coerce.number().int().min(-200).max(1500).optional(),
   locationId: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(20),
+  perPage: z.coerce.number().int().min(1).max(250).default(20),
 })
 export type ListBattlesQuery = z.infer<typeof listBattlesQuerySchema>
 
 // ── Trash list query ──────────────────────────────────────────────────
 export const listTrashQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  perPage: z.coerce.number().int().min(1).max(100).default(20),
+  perPage: z.coerce.number().int().min(1).max(250).default(20),
 })
 export type ListTrashQuery = z.infer<typeof listTrashQuerySchema>
 
