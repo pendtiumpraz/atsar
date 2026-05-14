@@ -19,6 +19,7 @@
 import { notFound } from 'next/navigation'
 
 import { FigureEditForm } from '@/components/admin/figures/figure-edit-form'
+import { FigureReingestPanel } from '@/components/admin/figures/figure-reingest-panel'
 import * as figureService from '@/lib/server/services/figure.service'
 
 interface PageProps {
@@ -42,25 +43,50 @@ export default async function AdminFigureEditPage({ params }: PageProps) {
     notFound()
   }
 
+  // Snapshot of fields the re-ingest diff panel can compare AI suggestions
+  // against. Kept in sync with the focus-field options in
+  // `<FigureReingestPanel />`.
+  const currentSnapshot = {
+    biographyId: figure.biographyId ?? null,
+    biographyAr: figure.biographyAr ?? null,
+    summaryId: figure.summaryId ?? null,
+    summaryAr: figure.summaryAr ?? null,
+    kunyahId: figure.kunyahId ?? null,
+    kunyahAr: figure.kunyahAr ?? null,
+    laqabId: figure.laqabId ?? null,
+    laqabAr: figure.laqabAr ?? null,
+    birthDateAh: figure.birthDateAh,
+    birthDateCe: figure.birthDateCe,
+    deathDateAh: figure.deathDateAh,
+    deathDateCe: figure.deathDateCe,
+    specialty: figure.specialty ?? null,
+    madhab: figure.madhab ?? null,
+    rijalGrade: figure.rijalGrade ?? null,
+  }
+
   return (
-    <FigureEditForm
-      initial={{
-        slug: figure.slug,
-        nameFullId: figure.nameFullId,
-        nameFullAr: figure.nameFullAr,
-        summaryId: figure.summaryId ?? '',
-        summaryAr: figure.summaryAr ?? '',
-        birthDateAh: figure.birthDateAh,
-        birthDateCe: figure.birthDateCe,
-        deathDateAh: figure.deathDateAh,
-        deathDateCe: figure.deathDateCe,
-        status: figure.status,
-        publishedAt: figure.publishedAt
-          ? figure.publishedAt instanceof Date
-            ? figure.publishedAt.toISOString()
-            : figure.publishedAt
-          : null,
-      }}
-    />
+    <div className="flex flex-col gap-8">
+      <FigureEditForm
+        initial={{
+          slug: figure.slug,
+          nameFullId: figure.nameFullId,
+          nameFullAr: figure.nameFullAr,
+          summaryId: figure.summaryId ?? '',
+          summaryAr: figure.summaryAr ?? '',
+          birthDateAh: figure.birthDateAh,
+          birthDateCe: figure.birthDateCe,
+          deathDateAh: figure.deathDateAh,
+          deathDateCe: figure.deathDateCe,
+          status: figure.status,
+          publishedAt: figure.publishedAt
+            ? figure.publishedAt instanceof Date
+              ? figure.publishedAt.toISOString()
+              : figure.publishedAt
+            : null,
+        }}
+      />
+
+      <FigureReingestPanel slug={figure.slug} current={currentSnapshot} />
+    </div>
   )
 }
