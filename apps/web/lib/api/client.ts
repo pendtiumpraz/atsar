@@ -189,6 +189,10 @@ export interface PaginatedResult<T> {
   page: number
   perPage: number
   totalPages: number
+  /** Any extra fields the route attached to `meta` (e.g. `summary` on
+   * /api/v1/ai/usage, `period` on stats endpoints). Preserved verbatim so
+   * dashboards that depend on per-endpoint aggregates can read them. */
+  [extra: string]: unknown
 }
 
 async function parsePaginated<T>(res: Response): Promise<PaginatedResult<T>> {
@@ -212,14 +216,14 @@ async function parsePaginated<T>(res: Response): Promise<PaginatedResult<T>> {
   }
   if (parsed.ok) {
     const data = Array.isArray(parsed.data) ? parsed.data : []
-    const meta = parsed.meta ?? {}
-    return {
-      rows: data,
-      total: typeof meta['total'] === 'number' ? meta['total'] : data.length,
-      page: typeof meta['page'] === 'number' ? meta['page'] : 1,
-      perPage: typeof meta['perPage'] === 'number' ? meta['perPage'] : data.length,
-      totalPages: typeof meta['totalPages'] === 'number' ? meta['totalPages'] : 1,
-    }
+    const meta = (parsed.meta ?? {}) as Record<string, unknown>
+    const total = typeof meta['total'] === 'number' ? (meta['total'] as number) : data.length
+    const page = typeof meta['page'] === 'number' ? (meta['page'] as number) : 1
+    const perPage = typeof meta['perPage'] === 'number' ? (meta['perPage'] as number) : data.length
+    const totalPages = typeof meta['totalPages'] === 'number' ? (meta['totalPages'] as number) : 1
+    // Spread any extra meta fields (summary, period, …) onto the result so
+    // endpoint-specific aggregates survive past the envelope unwrap.
+    return { ...meta, rows: data, total, page, perPage, totalPages } as PaginatedResult<T>
   }
   throw new ApiClientError(
     parsed.error.code,
