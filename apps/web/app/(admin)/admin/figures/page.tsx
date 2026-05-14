@@ -12,6 +12,7 @@
 
 import { FigureBatchIngestPanel } from '@/components/admin/figures/figure-batch-ingest-panel'
 import { FigureBulkList } from '@/components/admin/figures/figure-bulk-list'
+import { FigureDiscoverPanel } from '@/components/admin/figures/figure-discover-panel'
 import { FigureIngestPanel } from '@/components/admin/figures/figure-ingest-panel'
 
 export const metadata = {
@@ -35,6 +36,7 @@ export default function AdminFiguresPage() {
         </p>
       </header>
 
+      <FigureDiscoverPanel />
       <FigureIngestPanel />
       <FigureBatchIngestPanel />
       <FigureBulkList />
