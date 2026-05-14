@@ -64,7 +64,7 @@ export function AICreditChip() {
   return (
     <div className="relative group">
       <Link
-        href="/billing/ai-usage"
+        href="/billing/usage"
         aria-label={`Sisa kredit AI: ${formatNumber(credits)}`}
         className={cn(
           'inline-flex items-center gap-1.5 rounded-full px-2.5 h-8',

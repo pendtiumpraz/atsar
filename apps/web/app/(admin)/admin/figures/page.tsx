@@ -10,6 +10,7 @@
 // The page itself is a thin Server Component shell — the live state and
 // polling logic live in `<FigureIngestPanel />`.
 
+import { FigureBatchIngestPanel } from '@/components/admin/figures/figure-batch-ingest-panel'
 import { FigureIngestPanel } from '@/components/admin/figures/figure-ingest-panel'
 
 export const metadata = {
@@ -34,6 +35,7 @@ export default function AdminFiguresPage() {
       </header>
 
       <FigureIngestPanel />
+      <FigureBatchIngestPanel />
     </div>
   )
 }
