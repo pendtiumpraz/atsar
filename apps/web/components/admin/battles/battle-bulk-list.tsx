@@ -116,7 +116,7 @@ const FOCUS_FIELD_OPTIONS: { value: string; label: string }[] = [
 ]
 
 const RECENT_JOBS_KEY = ['admin', 'battle-ingest-jobs'] as const
-const PER_PAGE = 50
+const PER_PAGE = 10
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [debounced, setDebounced] = React.useState(value)

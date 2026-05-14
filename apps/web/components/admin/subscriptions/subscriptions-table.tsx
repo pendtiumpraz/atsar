@@ -83,7 +83,7 @@ function unwrapSubscriptionRows(
   return []
 }
 
-const PER_PAGE = 25
+const PER_PAGE = 10
 
 const STATUS_LABEL: Record<SubscriptionStatus, string> = {
   trial: 'Trial',

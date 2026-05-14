@@ -65,7 +65,7 @@ function unwrapRows(value: PaymentsListResponse | undefined): PaymentRow[] {
   return []
 }
 
-const PER_PAGE = 25
+const PER_PAGE = 10
 
 const STATUS_LABEL: Record<PaymentStatus, string> = {
   pending: 'Menunggu',

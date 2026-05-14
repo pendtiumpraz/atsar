@@ -47,7 +47,7 @@ interface RoleOption {
   nameId: string
 }
 
-const PER_PAGE = 20
+const PER_PAGE = 10
 
 const ALL_ROLE = '__all__'
 const ALL_STATUS = '__all__'

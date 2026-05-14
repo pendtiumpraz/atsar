@@ -74,7 +74,8 @@ const MADHAB_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'no_madhab', label: 'Tanpa Madzhab' },
 ]
 
-const DEFAULT_PAGE_SIZE = 30
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_INCREMENT = 10
 
 export interface UlamaSalafPlusProps {
   mode?: CalendarMode
@@ -83,7 +84,11 @@ export interface UlamaSalafPlusProps {
 export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
   const [spesialisasi, setSpesialisasi] = useState<string>('')
   const [madhab, setMadhab] = useState<string>('')
-  const [showAll, setShowAll] = useState(false)
+  /** Incremental reveal — start at DEFAULT_PAGE_SIZE, "Tampilkan 10 lagi"
+   *  bumps by PAGE_INCREMENT. Reset to default whenever filter changes
+   *  so the user doesn't end up with a previously-expanded count after
+   *  switching madhab/spesialisasi (which would feel jarring + slow). */
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_PAGE_SIZE)
 
   // Zoom state (percent). Hydrated from localStorage post-mount to keep
   // SSR + first client render identical and avoid hydration warnings.
@@ -161,9 +166,9 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
   }, [allFigures, spesialisasi, madhab])
 
   const visible = useMemo(() => {
-    if (showAll || filtered.length <= DEFAULT_PAGE_SIZE) return filtered
-    return filtered.slice(0, DEFAULT_PAGE_SIZE)
-  }, [filtered, showAll])
+    if (filtered.length <= visibleCount) return filtered
+    return filtered.slice(0, visibleCount)
+  }, [filtered, visibleCount])
 
   // Map to the SVG renderer's input shape.
   const svgFigures = useMemo<TimelineSvgFigure[]>(
@@ -192,7 +197,7 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
           value={spesialisasi}
           onChange={(v) => {
             setSpesialisasi(v)
-            setShowAll(false)
+            setVisibleCount(DEFAULT_PAGE_SIZE)
           }}
           options={SPESIALISASI_OPTIONS.map((o) => ({ value: o, label: o }))}
         />
@@ -201,7 +206,7 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
           value={madhab}
           onChange={(v) => {
             setMadhab(v)
-            setShowAll(false)
+            setVisibleCount(DEFAULT_PAGE_SIZE)
           }}
           options={MADHAB_OPTIONS}
         />
@@ -223,14 +228,21 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
           </div>
           <TimelineSvg figures={svgFigures} bands={BANDS} zoom={zoom} />
           {truncated && (
-            <div className="flex justify-center">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowAll(true)}
+                onClick={() =>
+                  setVisibleCount((c) =>
+                    Math.min(c + PAGE_INCREMENT, filtered.length),
+                  )
+                }
                 className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--surface))] px-4 py-2 text-sm font-medium text-[rgb(var(--text))] hover:bg-[rgb(var(--bg-elevated))]"
               >
-                Tampilkan semua {filtered.length} tokoh
+                Tampilkan {Math.min(PAGE_INCREMENT, filtered.length - visible.length)} lagi
               </button>
+              <span className="text-xs text-[rgb(var(--text-faint))]">
+                ({visible.length} dari {filtered.length})
+              </span>
             </div>
           )}
         </>
