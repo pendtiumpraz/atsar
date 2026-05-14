@@ -420,12 +420,23 @@ export const POST = withErrorHandling(async (req) => {
   const sources = await gatherSources(query, log)
 
   // 4. Call the LLM with the structured schema.
+  //    `maxTokens` scales with the requested limit — each candidate is
+  //    ~80-120 tokens (nameAr + nameId + optional kunyah/laqab + shortHint
+  //    + JSON braces) so we give ~150 tokens per candidate plus 800 for
+  //    JSON scaffolding. Hard floor 4_000, hard ceiling 16_000.
+  const dynamicMaxTokens = Math.min(
+    16_000,
+    Math.max(4_000, 800 + input.limit * 150),
+  )
   let llmResult
   try {
     llmResult = await generateObject({
       model,
       schema: discoverResponseSchema,
       system: DISCOVERY_SYSTEM_PROMPT,
+      // Force JSON mode rather than tool-call mode — DeepSeek's tool-call
+      // schema discipline is weaker than its JSON-mode discipline.
+      mode: 'json',
       prompt: buildUserPrompt({
         category: input.category,
         hints: input.hints,
@@ -435,8 +446,8 @@ export const POST = withErrorHandling(async (req) => {
         sources,
       }),
       temperature: 0.3,
-      maxTokens: 4_000,
-      maxRetries: 1,
+      maxTokens: dynamicMaxTokens,
+      maxRetries: 2,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
