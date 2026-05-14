@@ -196,21 +196,19 @@ export const POST = withSignature(async (req) => {
       orientation: job.orientation,
     })
 
-    // TODO: upload `buffer` to object storage.
-    //
-    // Two viable backends are already in the Phase-3 plan:
-    //   - Vercel Blob (`@vercel/blob put(buffer, { access: 'public' })`).
-    //   - Cloudflare R2 via `aws4fetch` using `S3_*` env vars (preferred
-    //     long-term; cheaper egress).
-    //
-    // For now we stash the byte length and synthesize a `/tmp/<id>.pdf`
-    // marker so the rest of the pipeline (status polling, notifications)
-    // can be wired and tested end-to-end without a storage dependency.
+    // Upload PDF to the configured storage backend (Vercel Blob primary,
+    // S3 fallback, local-stub for dev — see lib/server/uploads/storage.ts).
+    // The stored URL is public and the user downloads directly.
+    const { uploadFile } = await import('@/lib/server/uploads/storage')
     const fileSizeBytes = buffer.length
-    const fileUrl = `/tmp/${job.id}.pdf`
-    console.info('[jobs/pdf] (stub) would upload PDF', {
+    const key = `pdfs/${job.userId}/${job.id}.pdf`
+    const upload = await uploadFile(buffer, key, 'application/pdf')
+    const fileUrl = upload.url
+    console.info('[jobs/pdf] uploaded PDF', {
       jobId: job.id,
       bytes: fileSizeBytes,
+      backend: upload.backend,
+      url: fileUrl,
     })
 
     // Mark done.
