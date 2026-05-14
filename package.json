@@ -23,7 +23,13 @@
     "db:studio": "pnpm --filter @athar/db studio",
     "db:check": "pnpm --filter @athar/db check",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
-    "postinstall": "node node_modules/simple-git-hooks/cli.js || true"
+    "postinstall": "node -e \"if (!process.env.CI && !process.env.VERCEL) { try { require('child_process').execSync('node node_modules/simple-git-hooks/cli.js', { stdio: 'ignore' }) } catch {} }\""
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "simple-git-hooks",
+      "@sparticuz/chromium"
+    ]
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm exec lint-staged",
