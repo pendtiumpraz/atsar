@@ -271,8 +271,8 @@ export function ComparisonTimelineView({ mode = 'h' }: ComparisonTimelineViewPro
     queries: [
       { queryKey: ['figures', { category: 'sahabat', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'sahabat', perPage: 200 }), staleTime: 5 * 60 * 1000 },
       { queryKey: ['figures', { category: 'tabiin', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'tabiin', perPage: 200 }), staleTime: 5 * 60 * 1000 },
-      { queryKey: ['figures', { category: 'tabiut-tabiin', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'tabiut-tabiin', perPage: 200 }), staleTime: 5 * 60 * 1000 },
-      { queryKey: ['figures', { category: 'nabi-rasul', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'nabi-rasul', perPage: 200 }), staleTime: 5 * 60 * 1000 },
+      { queryKey: ['figures', { category: 'tabiut_tabiin', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'tabiut_tabiin', perPage: 200 }), staleTime: 5 * 60 * 1000 },
+      { queryKey: ['figures', { category: 'nabi', perPage: 200 }], queryFn: () => figuresApi.list({ category: 'nabi', perPage: 200 }), staleTime: 5 * 60 * 1000 },
     ],
   })
 

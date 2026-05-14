@@ -23,11 +23,11 @@ import { cn } from '@/lib/utils'
 
 /** Recognised category layer keys.  Mirrors the seed slugs in `figure-categories`. */
 export const CATEGORY_LAYERS = [
-  { key: 'nabi-rasul', label: 'Nabi' },
+  { key: 'nabi', label: 'Nabi' },
   { key: 'sahabat', label: 'Sahabat' },
   { key: 'tabiin', label: "Tabi'in" },
-  { key: 'tabiut-tabiin', label: "Tabi'ut Tabi'in" },
-  { key: 'ulama-salaf', label: 'Shalih' },
+  { key: 'tabiut_tabiin', label: "Tabi'ut Tabi'in" },
+  { key: 'shalih_pasca_rasul', label: 'Shalih' },
 ] as const
 
 export type CategoryLayerKey = (typeof CATEGORY_LAYERS)[number]['key']

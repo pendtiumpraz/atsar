@@ -46,8 +46,8 @@ type UlamaFigure = {
 const GENERATION_GROUPS = [
   { id: 'sahabat', label: 'Sahabat' },
   { id: 'tabiin', label: "Tabi'in" },
-  { id: 'tabiut-tabiin', label: "Tabi'ut Tabi'in" },
-  { id: 'ulama-salaf', label: 'Pasca-Salaf / Ulama' },
+  { id: 'tabiut_tabiin', label: "Tabi'ut Tabi'in" },
+  { id: 'shalih_pasca_rasul', label: 'Pasca-Salaf / Ulama' },
 ] as const
 
 const SPESIALISASI_OPTIONS = ['Hadits', 'Fiqh', 'Tafsir', 'Aqidah', 'Lughah']

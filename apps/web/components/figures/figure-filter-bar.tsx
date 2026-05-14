@@ -18,18 +18,19 @@ import { useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-// Hand-curated list of figure categories.  Mirrors the seed in
-// `packages/db/seed/figure-categories.ts` — should ideally come from
-// `/api/v1/figure-categories` but keeping it static keeps F10 self-contained
-// (no extra round-trip on every page load).
+// Hand-curated list of figure categories. Slugs MUST match the seed in
+// `packages/db/src/seeders/008_figure_categories.ts` — diverging here
+// silently returns empty result sets (the API filters by exact slug).
+// Shahabiyat aren't a separate category in the DB; users get them by
+// combining category=sahabat with gender=female.
 const CATEGORY_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: '', label: 'Semua Kategori' },
-  { value: 'nabi-rasul', label: 'Nabi & Rasul' },
-  { value: 'sahabat', label: 'Sahabat' },
-  { value: 'shahabiyat', label: 'Shahabiyat' },
+  { value: 'nabi', label: 'Nabi & Rasul' },
+  { value: 'shalih_pre_rasul', label: 'Shalih sebelum Rasul ﷺ' },
+  { value: 'sahabat', label: 'Sahabat & Shahabiyat' },
   { value: 'tabiin', label: "Tabi'in" },
-  { value: 'tabiut-tabiin', label: "Tabi'ut Tabi'in" },
-  { value: 'ulama-salaf', label: 'Ulama Salaf' },
+  { value: 'tabiut_tabiin', label: "Tabi'ut Tabi'in" },
+  { value: 'shalih_pasca_rasul', label: 'Ulama Salaf (Pasca Rasul ﷺ)' },
 ]
 
 const GENDER_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [

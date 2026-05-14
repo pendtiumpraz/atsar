@@ -96,7 +96,7 @@ export function ComparisonPicker({ initialIds = [], onChange }: ComparisonPicker
 
   const sahabat = useFigures('sahabat')
   const tabiin = useFigures('tabiin')
-  const tabiutTabiin = useFigures('tabiut-tabiin')
+  const tabiutTabiin = useFigures('tabiut_tabiin')
 
   // Build a quick id→figure lookup so the chips can show names without
   // chasing the dropdowns.
