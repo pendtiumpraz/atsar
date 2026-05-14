@@ -29,13 +29,15 @@
 // All work is wrapped in `withSignature` so only QStash can invoke it.
 
 import { z } from 'zod'
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, ilike, isNull, or } from 'drizzle-orm'
 
 import { db } from '@athar/db'
 import {
+  battles,
   citations,
   figureCategories,
   figures,
+  locations,
   researchJobs,
   reviewAssignments,
   roles,
@@ -48,6 +50,7 @@ import { publishJob } from '@/lib/server/qstash'
 import { redis } from '@/lib/server/upstash'
 import { logger } from '@/lib/server/logger'
 import {
+  extractBattleData,
   extractFigureData,
   fetchPage,
   RateLimitExceededError,
@@ -72,6 +75,14 @@ const CrawlPayload = z.object({
 // only sends the `research_jobs.id`; the worker pulls the rest from the row.
 const IngestPayload = z.object({
   type: z.literal('figure_ingest'),
+  jobId: z.string().uuid(),
+})
+
+// Re-ingest payload — refresh an EXISTING figure. Same row-by-jobId
+// indirection as the ingest path so the worker can be retried by QStash
+// without the producer holding state.
+const ReIngestPayload = z.object({
+  type: z.literal('figure_reingest'),
   jobId: z.string().uuid(),
 })
 
@@ -398,10 +409,17 @@ export const POST = withSignature(async (req) => {
     )
   }
 
-  // Dispatch on the discriminator: AI ingest path vs legacy crawl path.
+  // Dispatch on the discriminator: AI ingest path, re-ingest path, or
+  // legacy crawl path. Order matters — re-ingest carries its own `type`
+  // tag so it's checked before the type-less crawl fallback.
   const ingestParsed = IngestPayload.safeParse(json)
   if (ingestParsed.success) {
     return handleFigureIngest(ingestParsed.data.jobId)
+  }
+
+  const reIngestParsed = ReIngestPayload.safeParse(json)
+  if (reIngestParsed.success) {
+    return handleFigureReIngest(reIngestParsed.data.jobId)
   }
 
   const crawlParsed = CrawlPayload.safeParse(json)
@@ -537,6 +555,332 @@ async function handleFigureIngest(jobId: string): Promise<Response> {
 
   await markFailed(jobId, result.code, result.message)
   return failureResponse(result)
+}
+
+// ── figure_reingest ────────────────────────────────────────────────────
+//
+// Refresh an EXISTING figure row. Workflow:
+//   1. Load `research_jobs` row → set status=running.
+//   2. Load current figure record by `payload.figureId`.
+//   3. Build a fresh AI extraction via the same `searchWhitelist → fetchPage
+//      → extractFigureData` pipeline used for the ingest path.
+//   4. Merge AI output into the figure row per `mode`:
+//        - 'enrich' (default): only fill fields currently null/empty.
+//        - 'replace': overwrite the columns named in `focusFields` (and
+//          nothing else — all other fields are left untouched).
+//   5. INSERT new citations rows; never DELETE old ones (the old sources
+//      might still be valid for unchanged fields).
+//   6. UPDATE research_jobs status=completed, result_figure_id=figureId,
+//      metadata.fieldsChanged=[…] so the admin UI can highlight the diff.
+
+const MERGEABLE_FIELDS = [
+  'nameFullAr',
+  'nameFullId',
+  'kunyahAr',
+  'kunyahId',
+  'birthDateAh',
+  'deathDateAh',
+  'socialCategory',
+  'specialty',
+  'summaryAr',
+  'summaryId',
+  'biographyAr',
+  'biographyId',
+] as const
+
+type MergeableField = (typeof MERGEABLE_FIELDS)[number]
+
+/** Treat null, empty string, and empty array as "missing" for enrich mode. */
+function isEmptyValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true
+  if (typeof v === 'string' && v.trim() === '') return true
+  if (Array.isArray(v) && v.length === 0) return true
+  return false
+}
+
+async function handleFigureReIngest(jobId: string): Promise<Response> {
+  const log = logger.child({
+    route: '/api/jobs/research',
+    jobType: 'figure_reingest',
+    jobId,
+  })
+
+  // 1. Load the job row.
+  const job = await db.query.researchJobs.findFirst({
+    where: eq(researchJobs.id, jobId),
+  })
+  if (!job) {
+    log.warn({ jobId }, 'figure_reingest: job row not found')
+    return Response.json(
+      { ok: false, error: { code: 'NOT_FOUND', message: `research_jobs not found: ${jobId}` } },
+      { status: 404 },
+    )
+  }
+
+  // 2. Idempotency: terminal states are short-circuited.
+  if (job.status === 'completed') {
+    return Response.json({
+      ok: true,
+      figureId: job.resultFigureId,
+      alreadyCompleted: true,
+    })
+  }
+  if (job.status === 'failed') {
+    return Response.json({
+      ok: false,
+      error: {
+        code: job.errorCode ?? 'INTERNAL_ERROR',
+        message: job.errorMessage ?? 'previous run failed',
+      },
+    })
+  }
+
+  // 3. Mark running.
+  await db
+    .update(researchJobs)
+    .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+    .where(eq(researchJobs.id, jobId))
+
+  // 4. Coerce payload. The producer (re-ingest endpoint) writes this shape;
+  //    we re-validate defensively because nothing stops a future migration
+  //    from changing the format.
+  const payload = job.payload as {
+    figureId?: string
+    slug?: string
+    name?: string
+    categorySlug?: string
+    mode?: 'enrich' | 'replace'
+    focusFields?: MergeableField[]
+    hints?: string
+    originalSnapshot?: Record<string, unknown>
+  } | null
+
+  if (!payload?.figureId || !payload?.name || !payload?.categorySlug) {
+    const msg = 'payload missing figureId/name/categorySlug'
+    await markFailed(jobId, 'internal_error', msg)
+    log.error({ jobId, payload }, msg)
+    return Response.json(
+      { ok: false, error: { code: 'VALIDATION_ERROR', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // 5. Load the current figure row. It may have been soft-deleted between
+  //    the request and the worker pickup — we treat that as a no-op.
+  const currentFigure = await db.query.figures.findFirst({
+    where: and(eq(figures.id, payload.figureId), isNull(figures.deletedAt)),
+  })
+  if (!currentFigure) {
+    const msg = `Figure not found or deleted: ${payload.figureId}`
+    await markFailed(jobId, 'not_found', msg)
+    log.warn({ jobId, figureId: payload.figureId }, 'figure_reingest: figure missing')
+    return Response.json(
+      { ok: false, error: { code: 'NOT_FOUND', message: msg } },
+      { status: 404 },
+    )
+  }
+
+  // 6. Run the AI extraction. We deliberately DO NOT reuse `runResearch`
+  //    because that helper INSERTs a new draft row. The re-ingest path only
+  //    UPDATEs the existing row.
+  const domains = await loadActiveWhitelist()
+  let candidateUrls = await searchWhitelist(payload.name, domains)
+  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
+
+  const fetched: { url: string; content: string }[] = []
+  for (const url of candidateUrls) {
+    if (fetched.length >= MAX_SOURCES) break
+    try {
+      const res = await fetchPage(url)
+      fetched.push({ url: res.finalUrl, content: res.html })
+    } catch (err) {
+      if (err instanceof RateLimitExceededError) {
+        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
+        await markFailed(jobId, 'rate_limited', err.message)
+        return Response.json(
+          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          {
+            status: 429,
+            headers: {
+              'retry-after': String(Math.ceil(err.retryAfterMs / 1000)),
+            },
+          },
+        )
+      }
+      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+    }
+  }
+
+  if (fetched.length === 0) {
+    const msg =
+      'Tidak ada sumber yang dapat dikutip untuk tokoh ini. Tambahkan domain whitelist atau ubah ejaan nama.'
+    await markFailed(jobId, 'no_sources', msg)
+    return Response.json(
+      { ok: false, error: { code: 'NO_SOURCES', message: msg } },
+      { status: 422 },
+    )
+  }
+
+  // Bias the prompt toward the focusFields by appending an admin-hints
+  // message: the LLM still emits the full schema, but we tell it which
+  // columns the admin cares about most.
+  const focusList = payload.focusFields ?? []
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (focusList.length > 0) {
+    hintParts.push(
+      `Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`,
+    )
+  }
+  const hintedSources = hintParts.length > 0
+    ? [
+        ...fetched,
+        {
+          url: 'admin://hints',
+          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
+        },
+      ]
+    : fetched
+
+  let extraction
+  try {
+    extraction = await extractFigureData(payload.name, hintedSources)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'CONFLICT'
+    ) {
+      log.error({ err: message }, 'agent role not configured for figure_writer')
+      await markFailed(jobId, 'provider_not_configured', message)
+      return Response.json(
+        {
+          ok: false,
+          error: {
+            code: 'PROVIDER_NOT_CONFIGURED',
+            message:
+              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
+          },
+        },
+        { status: 503 },
+      )
+    }
+    log.error({ err: message }, 'LLM extraction threw')
+    await markFailed(jobId, 'internal_error', message)
+    return Response.json(
+      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
+      { status: 500 },
+    )
+  }
+
+  const { figureData, citations: cites, modelUsed } = extraction
+
+  // 7. Build the per-mode merge patch.
+  const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
+  // In replace mode an admin must specify which fields to overwrite (empty
+  // focusFields would replace everything — that's create-from-scratch, not
+  // a refresh). Default to "no-op" when focusFields is empty rather than
+  // wiping the row.
+  const replaceFields: Set<MergeableField> = new Set(
+    mode === 'replace' ? (payload.focusFields ?? []) : [],
+  )
+
+  const fieldsChanged: MergeableField[] = []
+  // Drizzle's `set()` is column-typed — we accumulate the patch under the
+  // table's inferred-insert type to keep type safety end-to-end.
+  type FigureUpdate = Partial<typeof figures.$inferInsert>
+  const patch: FigureUpdate = {}
+
+  for (const field of MERGEABLE_FIELDS) {
+    const aiValue = figureData[field as keyof typeof figureData] as unknown
+    if (isEmptyValue(aiValue)) continue
+    const currentValue = currentFigure[field] as unknown
+    if (mode === 'enrich') {
+      // Only fill if the current row has nothing.
+      if (!isEmptyValue(currentValue)) continue
+    } else {
+      // replace mode — only the explicitly-named fields are touched.
+      if (!replaceFields.has(field)) continue
+    }
+    // Safe assignment: every field in MERGEABLE_FIELDS is a known column on
+    // `figures` and `aiValue` matches the column type because
+    // `FigureExtractionSchema` (extract.ts) was built from the same schema.
+    ;(patch as Record<string, unknown>)[field] = aiValue
+    fieldsChanged.push(field)
+  }
+
+  // 8. UPDATE the figure row only if we actually have something to change.
+  if (Object.keys(patch).length > 0) {
+    await db
+      .update(figures)
+      .set({
+        ...patch,
+        updatedAt: new Date(),
+        // Preserve the original creator; just bump updatedBy to the job
+        // initiator so the audit log shows "refreshed by admin X".
+        ...(job.createdBy ? { updatedBy: job.createdBy } : {}),
+      })
+      .where(eq(figures.id, currentFigure.id))
+  }
+
+  // 9. INSERT new citations. We never DELETE the old citations — they may
+  //    still back fields we didn't touch. The admin can prune stale citations
+  //    from the Sumber tab on the figure detail page if needed.
+  const citationInserts = cites.map((c) => ({
+    contentType: 'figure',
+    contentId: currentFigure.id,
+    fieldPath: c.fieldPath,
+    sourceUrl: c.sourceUrl,
+    sourceDomain: hostOf(c.sourceUrl),
+    sourceExcerptAr: c.excerptAr,
+    sourceExcerptId: c.excerptId,
+    sourceLang: 'ar' as const,
+    modelUsed,
+    extractedAt: new Date(),
+  }))
+  let insertedCitationCount = 0
+  if (citationInserts.length > 0) {
+    const inserted = await db
+      .insert(citations)
+      .values(citationInserts)
+      .returning({ id: citations.id })
+    insertedCitationCount = inserted.length
+  }
+
+  // 10. Mark the job complete. The `metadata.fieldsChanged` blob lets the
+  //     admin UI highlight what the refresh actually mutated.
+  const updatedPayload = {
+    ...(payload as Record<string, unknown>),
+    metadata: {
+      mode,
+      sourcesUsed: fetched.length,
+      fieldsChanged,
+      citationsInserted: insertedCitationCount,
+      modelUsed,
+    },
+  }
+  await db
+    .update(researchJobs)
+    .set({
+      status: 'completed',
+      resultFigureId: currentFigure.id,
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+      payload: updatedPayload,
+    })
+    .where(eq(researchJobs.id, jobId))
+
+  return Response.json({
+    ok: true,
+    jobId,
+    figureId: currentFigure.id,
+    mode,
+    fieldsChanged,
+    sourcesUsed: fetched.length,
+    citationsInserted: insertedCitationCount,
+  })
 }
 
 async function markFailed(jobId: string, code: string, message: string): Promise<void> {

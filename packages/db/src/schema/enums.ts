@@ -259,6 +259,8 @@ export const researchJobTypeEnum = pgEnum('research_job_type_enum', [
   'figure_ingest',
   'battle_ingest',
   'location_ingest',
+  'figure_reingest',
+  'battle_reingest',
 ])
 
 export const researchJobStatusEnum = pgEnum('research_job_status_enum', [

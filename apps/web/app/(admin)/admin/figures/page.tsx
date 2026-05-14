@@ -11,6 +11,7 @@
 // polling logic live in `<FigureIngestPanel />`.
 
 import { FigureBatchIngestPanel } from '@/components/admin/figures/figure-batch-ingest-panel'
+import { FigureBulkList } from '@/components/admin/figures/figure-bulk-list'
 import { FigureIngestPanel } from '@/components/admin/figures/figure-ingest-panel'
 
 export const metadata = {
@@ -36,6 +37,7 @@ export default function AdminFiguresPage() {
 
       <FigureIngestPanel />
       <FigureBatchIngestPanel />
+      <FigureBulkList />
     </div>
   )
 }
