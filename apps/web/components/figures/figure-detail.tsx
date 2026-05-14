@@ -1,14 +1,14 @@
 // Right-pane detail view for a single figure (WIREFRAMES §6 + §7).
 //
-// - 'use client' for shadcn `<Tabs />` (uses Radix state hooks).
-// - Hydrates from the server-fetched `initialData` to avoid a flash of
-//   loading state, then refetches in the background via TanStack Query so
-//   future invalidations (after edit) propagate without a hard reload.
+// 'use client' so we can drive the tabs (Radix state) and the various
+// per-tab interactions (language toggle on Biografi, MapLibre on Peta).
+// Hydrates from `initialData` (server-fetched) and refetches in the
+// background via TanStack Query so post-edit invalidations propagate
+// without a hard reload.
 //
-// Tab content for everything beyond Biografi is a stub for now — full
-// implementations land in F12 (Timeline), F13 (Peta), F14 (Hubungan),
-// F15 (Hadits), F16 (Sumber).  We render a small placeholder so users see
-// the expected structure during Phase 4.
+// All six tabs render real data sourced from the enriched `getBySlug`
+// payload (see `figureService.getBySlug`). Each tab has a meaningful
+// empty state — never the words "Coming Soon".
 
 'use client'
 
@@ -19,9 +19,103 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { figuresApi } from '@/lib/api/endpoints'
 import { cn } from '@/lib/utils'
 
-// Same loose shape as the card — only the fields we render are typed.  The
-// service also returns `relations` + `locations`; we surface them where
-// applicable but tolerate `undefined`.
+import { FigureBiografiTab } from './tabs/figure-biografi-tab'
+import { FigureTimelineTab } from './tabs/figure-timeline-tab'
+import { FigurePetaTab } from './tabs/figure-peta-tab'
+import { FigureHubunganTab } from './tabs/figure-hubungan-tab'
+import { FigureHaditsTab } from './tabs/figure-hadits-tab'
+import { FigureSumberTab } from './tabs/figure-sumber-tab'
+
+// ─── Shared types ──────────────────────────────────────────────────────
+// Re-export so each tab subcomponent has a single source of truth and the
+// outer page doesn't have to import from `figure-detail.tsx` to type the
+// initialData hydrator.
+
+export interface FigureLocationEntry {
+  id: string
+  role:
+    | 'birthplace'
+    | 'residence'
+    | 'dakwah'
+    | 'martyr'
+    | 'burial'
+  periodStartAh: number | null
+  periodEndAh: number | null
+  notesAr: string | null
+  notesId: string | null
+  location: {
+    id: string
+    slug: string
+    nameId: string
+    nameAr: string
+    modernName: string | null
+    countryCode: string | null
+    region: string | null
+    coordinates: { type: 'Point'; coordinates: [number, number] } | null
+  }
+}
+
+export interface FigureRelationEntry {
+  id: string
+  relationType:
+    | 'teacher_of'
+    | 'student_of'
+    | 'father'
+    | 'mother'
+    | 'husband'
+    | 'wife'
+    | 'son'
+    | 'daughter'
+    | 'sibling'
+    | 'companion'
+    | 'descendant'
+    | 'ancestor'
+  notesAr: string | null
+  notesId: string | null
+  related: {
+    id: string
+    slug: string
+    gender: 'male' | 'female'
+    nameFullId: string
+    nameFullAr: string
+    nameShortId: string | null
+    nameShortAr: string | null
+  }
+}
+
+export interface FigureTimelineBattleEntry {
+  battleId: string
+  slug: string
+  nameId: string
+  nameAr: string
+  eventDateAh: number | null
+  eventDateCe: number | null
+  role: 'commander' | 'sahabat' | 'fallen' | 'captured'
+}
+
+export interface FigureTimelinePayload {
+  birthAh: number | null
+  birthCe: number | null
+  deathAh: number | null
+  deathCe: number | null
+  battles: FigureTimelineBattleEntry[]
+}
+
+export interface FigureCitationEntry {
+  id: string
+  sourceUrl: string
+  sourceDomain: string | null
+  sourceLang: 'ar' | 'id' | 'en' | null
+  sourceExcerptAr: string | null
+  sourceExcerptId: string | null
+  fieldPath: string | null
+  confidenceScore: string | null
+  createdAt: string | Date
+  extractedAt: string | Date | null
+  domain: { displayName: string | null; priority: number | null } | null
+}
+
+// Same loose shape as the card — only the fields we render are typed.
 export interface FigureDetailData {
   id: string
   slug: string
@@ -44,11 +138,17 @@ export interface FigureDetailData {
   summaryId?: string | null
   biographyAr?: string | null
   biographyId?: string | null
+  biographyPreWafatAr?: string | null
+  biographyPreWafatId?: string | null
+  biographyPostWafatAr?: string | null
+  biographyPostWafatId?: string | null
   hadithCountMin?: number | null
   hadithCountMax?: number | null
   category?: { slug?: string; nameId?: string | null; nameAr?: string | null } | null
-  locations?: unknown[]
-  relations?: unknown[]
+  locations?: FigureLocationEntry[]
+  relations?: FigureRelationEntry[]
+  timelineEvents?: FigureTimelinePayload
+  citations?: FigureCitationEntry[]
 }
 
 export interface FigureDetailProps {
@@ -145,123 +245,30 @@ export function FigureDetail({ slug, initialData }: FigureDetailProps) {
         </TabsList>
 
         <TabsContent value="biografi" className="mt-4">
-          <BiographyTab data={data} />
+          <FigureBiografiTab data={data} />
         </TabsContent>
 
         <TabsContent value="timeline" className="mt-4">
-          <TabPlaceholder
-            title="Timeline"
-            body="Sumbu hidup tokoh dengan peristiwa penting akan tampil di sini."
-          />
+          <FigureTimelineTab data={data} />
         </TabsContent>
 
         <TabsContent value="peta" className="mt-4">
-          <TabPlaceholder
-            title="Peta"
-            body={
-              data.locations && data.locations.length > 0
-                ? `${data.locations.length} lokasi tercatat. Peta akan dirender di tab ini.`
-                : 'Belum ada data lokasi untuk tokoh ini.'
-            }
-          />
+          <FigurePetaTab data={data} />
         </TabsContent>
 
         <TabsContent value="hubungan" className="mt-4">
-          <TabPlaceholder
-            title="Hubungan"
-            body={
-              data.relations && data.relations.length > 0
-                ? `${data.relations.length} relasi tercatat (guru/murid/keluarga). Graph network akan dirender di sini.`
-                : 'Belum ada data hubungan untuk tokoh ini.'
-            }
-          />
+          <FigureHubunganTab data={data} />
         </TabsContent>
 
         <TabsContent value="hadits" className="mt-4">
-          <HadithTab data={data} />
+          <FigureHaditsTab data={data} />
         </TabsContent>
 
         <TabsContent value="sumber" className="mt-4">
-          <TabPlaceholder
-            title="Sumber"
-            body="Daftar citation untuk tokoh ini akan tampil di sini. Klik citation membuka modal side-by-side dengan sumber asli."
-          />
+          <FigureSumberTab data={data} />
         </TabsContent>
       </Tabs>
     </article>
-  )
-}
-
-function BiographyTab({ data }: { data: FigureDetailData }) {
-  const summary = data.summaryId || data.summaryAr
-  const biography = data.biographyId || data.biographyAr
-
-  if (!summary && !biography) {
-    return (
-      <TabPlaceholder
-        title="Biografi"
-        body="Biografi tokoh ini sedang dipersiapkan oleh tim reviewer."
-      />
-    )
-  }
-
-  return (
-    <div className="prose-athar flex max-w-none flex-col gap-4 text-sm leading-relaxed text-[rgb(var(--text))]">
-      {summary ? (
-        <p className="text-base italic text-[rgb(var(--text-muted))]">{summary}</p>
-      ) : null}
-      {biography ? (
-        // No markdown renderer yet (lands with F11+) — show as preformatted
-        // text so paragraph breaks survive.  Replace with `react-markdown`
-        // when available.
-        <div className="whitespace-pre-wrap">{biography}</div>
-      ) : null}
-
-      <CitationStub />
-    </div>
-  )
-}
-
-function HadithTab({ data }: { data: FigureDetailData }) {
-  const { hadithCountMin, hadithCountMax } = data
-  if (typeof hadithCountMin !== 'number' && typeof hadithCountMax !== 'number') {
-    return (
-      <TabPlaceholder
-        title="Hadits"
-        body="Belum ada data jumlah hadits untuk tokoh ini."
-      />
-    )
-  }
-  const range =
-    typeof hadithCountMin === 'number' && typeof hadithCountMax === 'number'
-      ? `${hadithCountMin.toLocaleString('id-ID')} – ${hadithCountMax.toLocaleString('id-ID')}`
-      : (hadithCountMin ?? hadithCountMax)?.toLocaleString('id-ID')
-
-  return (
-    <div className="rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-4 text-sm text-[rgb(var(--text))]">
-      Diriwayatkan sekitar <span className="font-semibold">{range}</span> hadits.{' '}
-      <span className="text-[rgb(var(--text-muted))]">
-        Tautan ke koleksi hadits akan ditambahkan kemudian.
-      </span>
-    </div>
-  )
-}
-
-function TabPlaceholder({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-md border border-dashed border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-6 text-sm text-[rgb(var(--text-muted))]">
-      <div className="mb-1 font-semibold text-[rgb(var(--text))]">{title}</div>
-      <p>{body}</p>
-      <p className="mt-2 text-xs text-[rgb(var(--text-faint))]">Coming soon.</p>
-    </div>
-  )
-}
-
-function CitationStub() {
-  return (
-    <div className="mt-2 rounded-md border border-dashed border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-3 text-xs text-[rgb(var(--text-faint))]">
-      Daftar citation akan dirender di sini setelah modul Sumber tersedia.
-    </div>
   )
 }
 
