@@ -98,11 +98,111 @@ function hostOf(url: string): string | null {
 }
 
 /**
- * Fetch a page with rate limiting, timeout, and basic retry-on-5xx.
+ * SSRF guard — refuse URLs that would resolve to internal/loopback/link-local
+ * addresses. Without this, a DDG result that 301s to `http://169.254.169.254/`
+ * (AWS instance metadata), `http://127.0.0.1:6379` (loopback Redis), or
+ * `http://10.0.0.1/` (private LAN) would be happily fetched and parsed.
  *
- * The caller (research orchestrator) is responsible for deciding which URLs
- * to fetch — this function trusts whatever it's given. Whitelist enforcement
- * happens upstream when candidate URLs are generated.
+ * Two layers:
+ *   1. Scheme + literal-IP/hostname check on the input URL (cheap, deterministic).
+ *   2. DNS lookup on the hostname; if any resolved A/AAAA is private/loopback,
+ *      reject. This catches `internal.example.com` pointing at 10.0.0.1.
+ *
+ * Both `fetchPage`'s input URL AND any redirect target need this. The
+ * standard `fetch` honours `redirect: 'follow'` server-side without giving
+ * us a hook to vet each hop, so we switch to `redirect: 'manual'` and
+ * re-validate each hop (max 5 hops) ourselves.
+ */
+
+import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
+
+const ALLOWED_SCHEMES = new Set(['http:', 'https:'])
+
+const PRIVATE_HOSTNAMES = new Set([
+  'localhost',
+  'localhost.localdomain',
+  'ip6-localhost',
+  'ip6-loopback',
+])
+
+/** Refuse all the standard non-routable / metadata IP ranges. */
+function isPrivateIp(ip: string): boolean {
+  const family = isIP(ip)
+  if (family === 4) {
+    const [a, b] = ip.split('.').map((p) => Number(p))
+    if (a === undefined || b === undefined) return true
+    if (a === 10) return true
+    if (a === 127) return true
+    if (a === 0) return true
+    if (a === 169 && b === 254) return true // link-local incl. AWS/GCP metadata
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 192 && b === 168) return true
+    if (a === 100 && b >= 64 && b <= 127) return true // shared CGNAT
+    if (a >= 224) return true // multicast / reserved / broadcast
+    return false
+  }
+  if (family === 6) {
+    const lower = ip.toLowerCase()
+    if (lower === '::1' || lower === '::' || lower === '::ffff:0:0') return true
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true // ULA
+    if (lower.startsWith('fe80:') || lower.startsWith('fe8') || lower.startsWith('fe9')) return true // link-local
+    if (lower.startsWith('ff')) return true // multicast
+    // IPv4-mapped (::ffff:a.b.c.d) — extract the v4 and re-check.
+    const v4mapped = lower.match(/^::ffff:([0-9.]+)$/)
+    if (v4mapped && v4mapped[1]) return isPrivateIp(v4mapped[1]!)
+    return false
+  }
+  return false
+}
+
+async function assertPublicUrl(url: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new FetchError(url, null, 'invalid URL')
+  }
+  if (!ALLOWED_SCHEMES.has(parsed.protocol)) {
+    throw new FetchError(url, null, `scheme not allowed: ${parsed.protocol}`)
+  }
+  const host = parsed.hostname.toLowerCase()
+  if (!host || PRIVATE_HOSTNAMES.has(host)) {
+    throw new FetchError(url, null, `private hostname blocked: ${host}`)
+  }
+  // Literal IP shortcut — no DNS round trip needed.
+  if (isIP(host)) {
+    if (isPrivateIp(host)) {
+      throw new FetchError(url, null, `private IP blocked: ${host}`)
+    }
+    return
+  }
+  // Resolve the hostname and reject if ANY answer is private. The crawler is
+  // best-effort; a single private answer is a strong "do not fetch" signal.
+  // `all: true` returns the full record list; cast through the union so TS
+  // accepts the array narrowing regardless of the LookupAllOptions overload
+  // not picking up the `verbatim` flag cleanly.
+  let answers: Array<{ address: string; family: number }>
+  try {
+    const raw = (await lookup(host, { all: true, verbatim: true })) as unknown
+    answers = Array.isArray(raw) ? (raw as Array<{ address: string; family: number }>) : []
+  } catch (err) {
+    throw new FetchError(url, null, `dns lookup failed: ${(err as Error).message}`)
+  }
+  for (const r of answers) {
+    if (isPrivateIp(r.address)) {
+      throw new FetchError(url, null, `host resolves to private IP: ${host} → ${r.address}`)
+    }
+  }
+}
+
+/**
+ * Fetch a page with rate limiting, timeout, retry-on-5xx, and SSRF guards.
+ *
+ * The caller still decides which URLs are research-relevant (whitelist /
+ * DDG result), but every URL — including redirect targets — is vetted
+ * against the public-IP allowlist below so a malicious search result that
+ * 301s to a private IP can't reach internal infrastructure.
  */
 export async function fetchPage(
   url: string,
@@ -126,15 +226,32 @@ export async function fetchPage(
     const ac = new AbortController()
     const t = setTimeout(() => ac.abort(), timeoutMs)
     try {
-      const res = await fetch(url, {
-        signal: ac.signal,
-        redirect: 'follow',
-        headers: {
-          'user-agent': 'AtharResearchBot/1.0 (+https://athar.id/bot)',
-          accept: 'text/html,application/xhtml+xml',
-          'accept-language': 'ar,id;q=0.9,en;q=0.8',
-        },
-      })
+      // SSRF guard — vet every hop manually so a 30x redirect can't escape
+      // to a private IP. Max 5 redirects (matches browser default).
+      let currentUrl = url
+      let res: Response | null = null
+      for (let hop = 0; hop < 6; hop++) {
+        await assertPublicUrl(currentUrl)
+        res = await fetch(currentUrl, {
+          signal: ac.signal,
+          redirect: 'manual',
+          headers: {
+            'user-agent': 'AtharResearchBot/1.0 (+https://athar.id/bot)',
+            accept: 'text/html,application/xhtml+xml',
+            'accept-language': 'ar,id;q=0.9,en;q=0.8',
+          },
+        })
+        if (res.status >= 300 && res.status < 400) {
+          const next = res.headers.get('location')
+          if (!next) break
+          currentUrl = new URL(next, currentUrl).toString()
+          continue
+        }
+        break
+      }
+      if (!res) {
+        throw new FetchError(url, null, 'no response after redirect chain')
+      }
       if (!res.ok) {
         // Retry once on 5xx, never on 4xx.
         if (res.status >= 500 && attempt < maxAttempts) {
@@ -144,7 +261,7 @@ export async function fetchPage(
         throw new FetchError(url, res.status, res.statusText)
       }
       const html = await res.text()
-      return { finalUrl: res.url || url, html, status: res.status }
+      return { finalUrl: res.url || currentUrl, html, status: res.status }
     } catch (err) {
       if (err instanceof FetchError) throw err
       const message = err instanceof Error ? err.message : String(err)

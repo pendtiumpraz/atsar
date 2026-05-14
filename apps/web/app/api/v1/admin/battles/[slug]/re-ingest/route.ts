@@ -196,9 +196,10 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
       'QStash publish failed — falling back to inline self-fetch',
     )
     // QStash unavailable — fire-and-forget self-fetch with internal token.
+    // ONLY accept the dedicated job-token (no session-secret fallback) —
+    // mirrors the producer-side hardening in with-signature.ts.
     const origin = new URL(req.url).origin
-    const secret =
-      process.env['INTERNAL_JOB_TOKEN'] ?? process.env['BETTER_AUTH_SECRET']
+    const secret = process.env['INTERNAL_JOB_TOKEN']
     if (secret) {
       void fetch(`${origin}/api/jobs/research`, {
         method: 'POST',

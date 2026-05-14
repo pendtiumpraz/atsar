@@ -15,9 +15,8 @@ const bodySchema = z.object({
 })
 
 export const PUT = withErrorHandling(async (req) => {
-  await requirePermission(req, 'menu.manage')
+  const { userId } = await requirePermission(req, 'menu.manage')
   const { roleId, menuIds } = await validateBody(req, bodySchema)
-  // TODO(actor): resolve actorId from session once auth middleware lands.
-  await menuService.setRoleAccess(roleId, menuIds, null)
+  await menuService.setRoleAccess(roleId, menuIds, userId)
   return noContent()
 })

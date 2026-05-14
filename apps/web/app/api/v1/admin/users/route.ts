@@ -31,9 +31,8 @@ export const GET = withErrorHandling(async (req) => {
 })
 
 export const POST = withErrorHandling(async (req) => {
-  await requirePermission(req, 'users.invite')
+  const { userId } = await requirePermission(req, 'users.invite')
   const input = await validateBody(req, inviteSchema)
-  // TODO(actor): resolve actorId from session once auth middleware lands.
-  const result = await userService.invite(input, null)
+  const result = await userService.invite(input, userId)
   return created(result)
 })

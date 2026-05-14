@@ -27,9 +27,8 @@ export const GET = withErrorHandling(async (req) => {
 })
 
 export const POST = withErrorHandling(async (req) => {
-  await requirePermission(req, 'roles.manage')
+  const { userId } = await requirePermission(req, 'roles.manage')
   const input = await validateBody(req, createSchema)
-  // TODO(actor): resolve actorId from session cookie once auth middleware lands.
-  const row = await roleService.create(input, null)
+  const row = await roleService.create(input, userId)
   return created(row)
 })

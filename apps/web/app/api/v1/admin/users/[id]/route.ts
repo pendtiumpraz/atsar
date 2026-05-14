@@ -28,11 +28,10 @@ export const GET = withErrorHandling<RouteCtx>(async (req, ctx) => {
 })
 
 export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
-  await requirePermission(req, 'users.update')
+  const { userId } = await requirePermission(req, 'users.update')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const input = await validateBody(req, updateSchema)
-  // TODO(actor): resolve actorId from session once auth middleware lands.
-  const row = await userService.update(id, input, null)
+  const row = await userService.update(id, input, userId)
   return ok(row)
 })
 
@@ -40,9 +39,8 @@ export const PATCH = withErrorHandling<RouteCtx>(async (req, ctx) => {
 export const PUT = PATCH
 
 export const DELETE = withErrorHandling<RouteCtx>(async (req, ctx) => {
-  await requirePermission(req, 'users.delete')
+  const { userId } = await requirePermission(req, 'users.delete')
   const { id } = validateParams(await ctx.params, paramsSchema)
-  // TODO(actor): resolve actorId from session once auth middleware lands.
-  await userService.softDelete(id, null)
+  await userService.softDelete(id, userId)
   return noContent()
 })

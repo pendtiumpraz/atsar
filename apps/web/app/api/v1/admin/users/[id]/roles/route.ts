@@ -17,10 +17,9 @@ const bodySchema = z.object({
 type RouteCtx = { params: Promise<{ id: string }> | { id: string } }
 
 export const PUT = withErrorHandling<RouteCtx>(async (req, ctx) => {
-  await requirePermission(req, 'users.set_role')
+  const { userId } = await requirePermission(req, 'users.set_role')
   const { id } = validateParams(await ctx.params, paramsSchema)
   const { roleIds } = await validateBody(req, bodySchema)
-  // TODO(actor): resolve actorId from session once auth middleware lands.
-  await userService.setRoles(id, roleIds, null)
+  await userService.setRoles(id, roleIds, userId)
   return noContent()
 })

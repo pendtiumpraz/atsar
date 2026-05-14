@@ -215,8 +215,10 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
     // internal token so the worker still runs. We don't await; the admin
     // gets a 202 immediately and polls the job row for status.
     const origin = new URL(req.url).origin
-    const secret =
-      process.env['INTERNAL_JOB_TOKEN'] ?? process.env['BETTER_AUTH_SECRET']
+    // ONLY accept the dedicated job-token. Falling back to BETTER_AUTH_SECRET
+    // would mean a session-signing leak also lets attackers self-trigger
+    // the worker — keep the two scopes separate.
+    const secret = process.env['INTERNAL_JOB_TOKEN']
     if (secret) {
       void fetch(`${origin}/api/jobs/research`, {
         method: 'POST',
