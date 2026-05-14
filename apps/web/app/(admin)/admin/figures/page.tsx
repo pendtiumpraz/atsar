@@ -10,10 +10,7 @@
 // The page itself is a thin Server Component shell — the live state and
 // polling logic live in `<FigureIngestPanel />`.
 
-import { FigureBatchIngestPanel } from '@/components/admin/figures/figure-batch-ingest-panel'
-import { FigureBulkList } from '@/components/admin/figures/figure-bulk-list'
-import { FigureDiscoverPanel } from '@/components/admin/figures/figure-discover-panel'
-import { FigureIngestPanel } from '@/components/admin/figures/figure-ingest-panel'
+import { FigureAdminTabs } from '@/components/admin/figures/figure-admin-tabs'
 
 export const metadata = {
   title: 'Tokoh · Admin Atsar',
@@ -36,10 +33,7 @@ export default function AdminFiguresPage() {
         </p>
       </header>
 
-      <FigureDiscoverPanel />
-      <FigureIngestPanel />
-      <FigureBatchIngestPanel />
-      <FigureBulkList />
+      <FigureAdminTabs />
     </div>
   )
 }
