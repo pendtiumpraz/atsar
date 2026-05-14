@@ -13,11 +13,23 @@ import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-type ParticipantRole = 'commander' | 'sahabat' | 'fallen' | 'captured'
+type ParticipantRole =
+  | 'commander'
+  | 'sub_commander'
+  | 'sahabat'
+  | 'fallen'
+  | 'captured'
+  | 'wounded'
+  | 'witness'
+  | 'flag_bearer'
+  | 'envoy'
+
+type ParticipantSide = 'muslim' | 'opponent' | 'both'
 
 export interface ParticipantListItem {
   figureId?: string
   role?: ParticipantRole | string | null
+  side?: ParticipantSide | string | null
   notesAr?: string | null
   notesId?: string | null
   figure?: {
@@ -38,20 +50,43 @@ export interface ParticipantListProps {
 // Display order + Indonesian label for each role.
 const ROLE_GROUPS: ReadonlyArray<{ role: ParticipantRole; label: string }> = [
   { role: 'commander', label: 'Panglima' },
-  { role: 'sahabat', label: 'Sahabat' },
+  { role: 'sub_commander', label: 'Wakil panglima' },
+  { role: 'flag_bearer', label: 'Pembawa panji' },
+  { role: 'sahabat', label: 'Sahabat / prajurit' },
   { role: 'fallen', label: 'Syuhada / Gugur' },
+  { role: 'wounded', label: 'Terluka' },
   { role: 'captured', label: 'Tertawan' },
+  { role: 'envoy', label: 'Utusan' },
+  { role: 'witness', label: 'Saksi' },
+]
+
+// Display order + Indonesian label for each side.
+const SIDE_GROUPS: ReadonlyArray<{ side: ParticipantSide; label: string }> = [
+  { side: 'muslim', label: 'Muslim' },
+  { side: 'opponent', label: 'Pihak lawan' },
+  { side: 'both', label: 'Kedua belah pihak' },
 ]
 
 export function ParticipantList({ participants, className }: ParticipantListProps) {
-  // Group participants by role. Unknown roles are bucketed under 'sahabat'
-  // so the UI never silently drops a row.
-  const grouped = useMemo(() => {
-    const map = new Map<ParticipantRole, ParticipantListItem[]>()
-    for (const group of ROLE_GROUPS) map.set(group.role, [])
+  // Group participants first by side (Muslim / Opponent / Both) then by role.
+  // Unknown roles bucket under 'sahabat'; unknown sides default to 'muslim'
+  // (every legacy row was Muslim-side until Phase 7.5.6 introduced `side`).
+  // Sides with zero participants are hidden so single-side battles stay clean.
+  const groupedBySide = useMemo(() => {
+    const map = new Map<ParticipantSide, Map<ParticipantRole, ParticipantListItem[]>>()
+    for (const sideGroup of SIDE_GROUPS) {
+      const inner = new Map<ParticipantRole, ParticipantListItem[]>()
+      for (const roleGroup of ROLE_GROUPS) inner.set(roleGroup.role, [])
+      map.set(sideGroup.side, inner)
+    }
     for (const p of participants) {
-      const role = (p.role && ROLE_GROUPS.some((g) => g.role === p.role) ? p.role : 'sahabat') as ParticipantRole
-      map.get(role)!.push(p)
+      const side = (
+        p.side && SIDE_GROUPS.some((g) => g.side === p.side) ? p.side : 'muslim'
+      ) as ParticipantSide
+      const role = (
+        p.role && ROLE_GROUPS.some((g) => g.role === p.role) ? p.role : 'sahabat'
+      ) as ParticipantRole
+      map.get(side)!.get(role)!.push(p)
     }
     return map
   }, [participants])
@@ -69,26 +104,57 @@ export function ParticipantList({ participants, className }: ParticipantListProp
     )
   }
 
+  // Render every populated side as its own section. Inside each side, show
+  // every role bucket that has at least one row.
+  const populatedSides = SIDE_GROUPS.filter(({ side }) => {
+    const inner = groupedBySide.get(side)
+    if (!inner) return false
+    let total = 0
+    for (const arr of inner.values()) total += arr.length
+    return total > 0
+  })
+
   return (
-    <div className={cn('flex flex-col gap-5', className)}>
-      {ROLE_GROUPS.map(({ role, label }) => {
-        const rows = grouped.get(role) ?? []
-        if (rows.length === 0) return null
+    <div className={cn('flex flex-col gap-6', className)}>
+      {populatedSides.map(({ side, label }) => {
+        const inner = groupedBySide.get(side)!
+        let sideTotal = 0
+        for (const arr of inner.values()) sideTotal += arr.length
         return (
-          <section key={role} className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-sm font-semibold text-[rgb(var(--text))]">{label}</h3>
+          <section key={side} className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-between border-b border-[rgb(var(--border))] pb-1">
+              <h2 className="text-base font-semibold text-[rgb(var(--text))]">
+                {label}
+              </h2>
               <span className="text-xs text-[rgb(var(--text-faint))]">
-                {rows.length} orang
+                {sideTotal} orang
               </span>
             </div>
-            <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {rows.map((p, idx) => (
-                <li key={`${role}-${p.figureId ?? idx}`}>
-                  <ParticipantMiniCard item={p} />
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-col gap-4">
+              {ROLE_GROUPS.map(({ role, label: roleLabel }) => {
+                const rows = inner.get(role) ?? []
+                if (rows.length === 0) return null
+                return (
+                  <section key={`${side}-${role}`} className="flex flex-col gap-2">
+                    <div className="flex items-baseline justify-between">
+                      <h3 className="text-sm font-semibold text-[rgb(var(--text))]">
+                        {roleLabel}
+                      </h3>
+                      <span className="text-xs text-[rgb(var(--text-faint))]">
+                        {rows.length} orang
+                      </span>
+                    </div>
+                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {rows.map((p, idx) => (
+                        <li key={`${side}-${role}-${p.figureId ?? idx}`}>
+                          <ParticipantMiniCard item={p} />
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
           </section>
         )
       })}

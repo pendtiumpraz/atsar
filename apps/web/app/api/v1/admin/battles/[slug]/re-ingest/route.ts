@@ -16,10 +16,10 @@
 // Permission: `battles.update`.
 
 import { z } from 'zod'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 
 import { db } from '@athar/db'
-import { battles, researchJobs } from '@athar/db/schema'
+import { battlePhases, battles, researchJobs } from '@athar/db/schema'
 import { ApiError, ok, validateBody, validateParams, withErrorHandling } from '@/lib/server/api'
 import { requirePermission } from '@/lib/server/rbac'
 import { publishJob } from '@/lib/server/qstash'
@@ -28,6 +28,11 @@ import { logger } from '@/lib/server/logger'
 // Re-ingest writeable surface — admins can ask the AI to refresh any of these.
 // The worker still ground-truths against the BattleExtraction schema so unknown
 // keys are ignored downstream.
+//
+// `participants` and `phases` are VIRTUAL focus fields: they do not name a
+// column on `battles`. The worker's `handleBattleReIngest` branches on these
+// to drive the `battle_participants` / `battle_phases` sub-pipelines (Phase
+// 7.5.6 — Tokoh peserta + Fase pertempuran).
 const RE_INGEST_FIELDS = [
   'nameAr',
   'nameId',
@@ -45,6 +50,8 @@ const RE_INGEST_FIELDS = [
   'narrativeId',
   'significanceId',
   'citations',
+  'participants',
+  'phases',
 ] as const
 
 const paramsSchema = z.object({
@@ -87,6 +94,15 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
   }
 
   // 2. Capture the original snapshot so the diff is replayable.
+  //    Phase 7.5.6: also snapshot the current `battle_phases` rows so a
+  //    future "Tolak" on the Fase row can restore them (the worker
+  //    soft-deletes the originals in replace mode).
+  const existingPhases = await db
+    .select()
+    .from(battlePhases)
+    .where(and(eq(battlePhases.battleId, battle.id), isNull(battlePhases.deletedAt)))
+    .orderBy(asc(battlePhases.phaseOrder))
+
   const originalSnapshot = {
     id: battle.id,
     slug: battle.slug,
@@ -106,6 +122,19 @@ export const POST = withErrorHandling<RouteCtx>(async (req, ctx) => {
     strategyId: battle.strategyId,
     narrativeId: battle.narrativeId,
     significanceId: battle.significanceId,
+    // Compact phase snapshot — column names mirror the table.
+    phases: existingPhases.map((p) => ({
+      id: p.id,
+      phaseOrder: p.phaseOrder,
+      titleAr: p.titleAr,
+      titleId: p.titleId,
+      descriptionAr: p.descriptionAr,
+      descriptionId: p.descriptionId,
+      phaseLocationId: p.phaseLocationId,
+      arrowFromId: p.arrowFromId,
+      arrowToId: p.arrowToId,
+      durationHours: p.durationHours,
+    })),
   }
 
   // 3. Insert the job row first — audit-first discipline so a QStash publish

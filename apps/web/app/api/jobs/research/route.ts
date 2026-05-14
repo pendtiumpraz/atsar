@@ -33,6 +33,8 @@ import { and, asc, eq, ilike, isNull, or } from 'drizzle-orm'
 
 import { db } from '@athar/db'
 import {
+  battleParticipants,
+  battlePhases,
   battles,
   citations,
   figureCategories,
@@ -1267,6 +1269,76 @@ const BATTLE_MERGEABLE_FIELDS = [
 
 type BattleMergeableField = (typeof BATTLE_MERGEABLE_FIELDS)[number]
 
+// "Virtual" focus fields the admin can toggle — these do NOT correspond to
+// columns on `battles`; they switch on the participant / phase sub-pipelines
+// in `handleBattleReIngest`. The route's Zod allowlist treats them as opaque
+// strings so the worker can branch on them without typing them as column
+// names.
+type BattleVirtualFocus = 'participants' | 'phases'
+type BattleFocusField = BattleMergeableField | BattleVirtualFocus | 'citations'
+
+/**
+ * Map the AI-emitted role onto the DB enum. The AI is allowed to emit nine
+ * fine-grained values (see `battle-schema.ts`); the DB enum has every value
+ * verbatim EXCEPT `soldier` and `martyr`, which collapse onto the legacy
+ * `sahabat` and `fallen` buckets respectively. Keeps existing seeders /
+ * curated rows valid without a destructive enum rename.
+ */
+function mapParticipantRole(
+  aiRole:
+    | 'commander'
+    | 'sub_commander'
+    | 'soldier'
+    | 'martyr'
+    | 'captured'
+    | 'wounded'
+    | 'witness'
+    | 'flag_bearer'
+    | 'envoy',
+):
+  | 'commander'
+  | 'sub_commander'
+  | 'sahabat'
+  | 'fallen'
+  | 'captured'
+  | 'wounded'
+  | 'witness'
+  | 'flag_bearer'
+  | 'envoy' {
+  if (aiRole === 'soldier') return 'sahabat'
+  if (aiRole === 'martyr') return 'fallen'
+  return aiRole
+}
+
+/**
+ * Resolve a free-text figure name (either Indonesian or Arabic) against the
+ * `figures` table via case-insensitive ILIKE. Tries the longer string first
+ * to bias toward specific matches over kunyah-only collisions. Returns null
+ * when no active figure matches — the caller is expected to SKIP the row
+ * rather than insert a ghost.
+ */
+async function resolveFigureIdByName(args: {
+  nameId: string
+  nameAr: string
+}): Promise<string | null> {
+  const id = args.nameId.trim()
+  const ar = args.nameAr.trim()
+  if (!id && !ar) return null
+
+  // Exact-ish ILIKE on the longer name first (more specific), then the other.
+  const clauses = [
+    id ? ilike(figures.nameFullId, `%${id}%`) : null,
+    ar ? ilike(figures.nameFullAr, `%${ar}%`) : null,
+  ].filter((c): c is NonNullable<typeof c> => c !== null)
+  if (clauses.length === 0) return null
+
+  const row = await db.query.figures.findFirst({
+    where: and(or(...clauses)!, isNull(figures.deletedAt)),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
 async function handleBattleReIngest(jobId: string): Promise<Response> {
   const log = logger.child({
     route: '/api/jobs/research',
@@ -1312,7 +1384,9 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
     name?: string
     type?: 'ghazwah' | 'sariyyah' | 'futuhat'
     mode?: 'enrich' | 'replace'
-    focusFields?: BattleMergeableField[]
+    /** Mix of real battle columns and virtual sub-pipelines (`participants`,
+     *  `phases`, `citations`). The merge loop filters out virtual entries. */
+    focusFields?: BattleFocusField[]
     hints?: string
     originalSnapshot?: Record<string, unknown>
   } | null
@@ -1432,9 +1506,20 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
 
   // 6. Per-mode merge patch.
   const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
+  // `participants` / `phases` / `citations` are virtual focus fields routed
+  // to their own sub-pipelines below — exclude them from the column-merge
+  // set so the loop only ever touches real `battles` columns.
   const replaceFields: Set<BattleMergeableField> = new Set(
-    mode === 'replace' ? (payload.focusFields ?? []) : [],
+    mode === 'replace'
+      ? (payload.focusFields ?? []).filter(
+          (f): f is BattleMergeableField =>
+            (BATTLE_MERGEABLE_FIELDS as readonly string[]).includes(f),
+        )
+      : [],
   )
+  const focusEnabled = new Set<BattleFocusField>(payload.focusFields ?? [])
+  const wantsParticipants = focusEnabled.has('participants')
+  const wantsPhases = focusEnabled.has('phases')
 
   const fieldsChanged: BattleMergeableField[] = []
   const patch: Partial<Record<BattleMergeableField, unknown>> = {}
@@ -1483,6 +1568,266 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
       .where(eq(battles.id, currentBattle.id))
   }
 
+  // 8b. Participants (`battle_participants`) sub-pipeline ──────────────
+  //
+  // Mode semantics:
+  //   - 'enrich': INSERT a new row only when `(battleId, figureId)` is not
+  //     already in the table. Existing curated rows are NEVER updated.
+  //   - 'replace': UPDATE the existing row's role/side/notes from the AI
+  //     output, OR INSERT if missing. Pre-existing rows whose figure does
+  //     NOT appear in the AI output are LEFT ALONE — we never wipe curated
+  //     tokoh, even in replace mode.
+  //
+  // Resolution: each AI participant carries `figureNameId` / `figureNameAr`;
+  // the worker ILIKE-matches against `figures.nameFullId/Ar`. Unresolved
+  // names are SKIPPED (logged) — the full ingest flow is expected to create
+  // the figure first, then a follow-up re-ingest picks them up.
+  //
+  // Tracked for the diff dialog under `metadata.participants`:
+  //   - added:    figures inserted this run
+  //   - updated:  rows whose role/side/notes were rewritten (replace only)
+  //   - skipped:  AI names that could not be resolved
+  const aiParticipants = (battleData as { participants?: unknown }).participants
+  const participantStats: {
+    added: { figureId: string; nameId: string; nameAr: string; role: string }[]
+    updated: { figureId: string; nameId: string }[]
+    skipped: { nameId: string; nameAr: string }[]
+  } = { added: [], updated: [], skipped: [] }
+
+  if (wantsParticipants && Array.isArray(aiParticipants) && aiParticipants.length > 0) {
+    // Existing participant rows for this battle — used to short-circuit
+    // INSERTs in enrich mode and to pick UPDATE vs INSERT in replace mode.
+    const existing = await db
+      .select({
+        figureId: battleParticipants.figureId,
+      })
+      .from(battleParticipants)
+      .where(eq(battleParticipants.battleId, currentBattle.id))
+    const existingSet = new Set(existing.map((r) => r.figureId))
+
+    for (const raw of aiParticipants) {
+      const p = raw as {
+        figureNameId: string
+        figureNameAr: string
+        role:
+          | 'commander'
+          | 'sub_commander'
+          | 'soldier'
+          | 'martyr'
+          | 'captured'
+          | 'wounded'
+          | 'witness'
+          | 'flag_bearer'
+          | 'envoy'
+        side: 'muslim' | 'opponent' | 'both'
+        notesId: string | null
+        notesAr: string | null
+      }
+      const resolvedId = await resolveFigureIdByName({
+        nameId: p.figureNameId,
+        nameAr: p.figureNameAr,
+      })
+      if (!resolvedId) {
+        log.warn(
+          { battleId: currentBattle.id, nameId: p.figureNameId, nameAr: p.figureNameAr },
+          'participant unresolved — skipped (will be picked up after figure_ingest)',
+        )
+        participantStats.skipped.push({ nameId: p.figureNameId, nameAr: p.figureNameAr })
+        continue
+      }
+
+      const dbRole = mapParticipantRole(p.role)
+      const alreadyExists = existingSet.has(resolvedId)
+
+      if (mode === 'enrich') {
+        if (alreadyExists) continue
+        try {
+          await db.insert(battleParticipants).values({
+            battleId: currentBattle.id,
+            figureId: resolvedId,
+            role: dbRole,
+            side: p.side,
+            notesAr: p.notesAr,
+            notesId: p.notesId,
+          })
+          participantStats.added.push({
+            figureId: resolvedId,
+            nameId: p.figureNameId,
+            nameAr: p.figureNameAr,
+            role: dbRole,
+          })
+          existingSet.add(resolvedId)
+        } catch (err) {
+          log.warn(
+            { err: (err as Error).message, battleId: currentBattle.id, figureId: resolvedId },
+            'enrich INSERT participant failed (non-fatal)',
+          )
+        }
+      } else {
+        // replace mode: UPDATE if present, else INSERT.
+        if (alreadyExists) {
+          await db
+            .update(battleParticipants)
+            .set({
+              role: dbRole,
+              side: p.side,
+              notesAr: p.notesAr,
+              notesId: p.notesId,
+            })
+            .where(
+              and(
+                eq(battleParticipants.battleId, currentBattle.id),
+                eq(battleParticipants.figureId, resolvedId),
+              ),
+            )
+          participantStats.updated.push({ figureId: resolvedId, nameId: p.figureNameId })
+        } else {
+          try {
+            await db.insert(battleParticipants).values({
+              battleId: currentBattle.id,
+              figureId: resolvedId,
+              role: dbRole,
+              side: p.side,
+              notesAr: p.notesAr,
+              notesId: p.notesId,
+            })
+            participantStats.added.push({
+              figureId: resolvedId,
+              nameId: p.figureNameId,
+              nameAr: p.figureNameAr,
+              role: dbRole,
+            })
+            existingSet.add(resolvedId)
+          } catch (err) {
+            log.warn(
+              { err: (err as Error).message, battleId: currentBattle.id, figureId: resolvedId },
+              'replace INSERT participant failed (non-fatal)',
+            )
+          }
+        }
+      }
+    }
+  }
+
+  // 8c. Phases (`battle_phases`) sub-pipeline ──────────────────────────
+  //
+  // Mode semantics:
+  //   - 'enrich': only INSERT new phases when the battle currently has ZERO
+  //     non-soft-deleted phase rows. We never mix AI phases with curated
+  //     ones (that would break the orderIndex contract).
+  //   - 'replace': soft-delete every existing phase for this battle, then
+  //     INSERT the new ordered set. The originalSnapshot in research_jobs
+  //     payload already captured the pre-state if a future "Tolak" needs
+  //     to restore.
+  //
+  // Slug resolution: `locationSlug`, `arrowFromSlug`, `arrowToSlug` map to
+  // `locations.slug` via exact lookup; failures fall back to null so the
+  // phase still inserts (the reviewer can wire it up later).
+  const aiPhases = (battleData as { phases?: unknown }).phases
+  const phasesStats: {
+    inserted: number
+    softDeleted: number
+    titlesId: string[]
+  } = { inserted: 0, softDeleted: 0, titlesId: [] }
+
+  if (wantsPhases && Array.isArray(aiPhases) && aiPhases.length > 0) {
+    const existingPhases = await db
+      .select({ id: battlePhases.id })
+      .from(battlePhases)
+      .where(and(eq(battlePhases.battleId, currentBattle.id), isNull(battlePhases.deletedAt)))
+
+    const canWritePhases =
+      mode === 'replace' ? true : existingPhases.length === 0
+
+    if (canWritePhases) {
+      // Resolve every unique slug in one pass — avoids N+1 round-trips when
+      // the AI emits a long chain of phases sharing locations.
+      const allSlugs = new Set<string>()
+      for (const raw of aiPhases) {
+        const p = raw as {
+          locationSlug: string | null
+          arrowFromSlug: string | null
+          arrowToSlug: string | null
+        }
+        if (p.locationSlug) allSlugs.add(p.locationSlug)
+        if (p.arrowFromSlug) allSlugs.add(p.arrowFromSlug)
+        if (p.arrowToSlug) allSlugs.add(p.arrowToSlug)
+      }
+      const slugMap = new Map<string, string>()
+      if (allSlugs.size > 0) {
+        const rows = await db
+          .select({ id: locations.id, slug: locations.slug })
+          .from(locations)
+          .where(isNull(locations.deletedAt))
+        for (const r of rows) {
+          if (allSlugs.has(r.slug)) slugMap.set(r.slug, r.id)
+        }
+      }
+      const lookupSlug = (slug: string | null | undefined): string | null =>
+        slug ? slugMap.get(slug) ?? null : null
+
+      // Build the insert payload first so we can validate orderIndex
+      // uniqueness without hitting the DB.
+      const phaseRows = (aiPhases as Array<{
+        orderIndex: number
+        nameId: string
+        nameAr: string
+        narrativeId: string
+        narrativeAr: string | null
+        locationSlug: string | null
+        arrowFromSlug: string | null
+        arrowToSlug: string | null
+        durationHours: number | null
+      }>)
+        // Stable sort by orderIndex so the DB rows reflect AI sequence.
+        .slice()
+        .sort((a, b) => a.orderIndex - b.orderIndex)
+        .map((p) => ({
+          battleId: currentBattle.id,
+          phaseOrder: p.orderIndex,
+          titleId: p.nameId,
+          titleAr: p.nameAr,
+          descriptionId: p.narrativeId,
+          descriptionAr: p.narrativeAr,
+          phaseLocationId: lookupSlug(p.locationSlug),
+          arrowFromId: lookupSlug(p.arrowFromSlug),
+          arrowToId: lookupSlug(p.arrowToSlug),
+          durationHours: p.durationHours,
+          createdBy: job.createdBy ?? null,
+        }))
+
+      if (mode === 'replace' && existingPhases.length > 0) {
+        // Soft-delete the curated rows in one round-trip. We deliberately
+        // do NOT hard-delete so a future Tolak can resurrect them.
+        const now = new Date()
+        await db
+          .update(battlePhases)
+          .set({ deletedAt: now, deletedBy: job.createdBy ?? null })
+          .where(
+            and(
+              eq(battlePhases.battleId, currentBattle.id),
+              isNull(battlePhases.deletedAt),
+            ),
+          )
+        phasesStats.softDeleted = existingPhases.length
+      }
+
+      if (phaseRows.length > 0) {
+        const inserted = await db
+          .insert(battlePhases)
+          .values(phaseRows)
+          .returning({ id: battlePhases.id, titleId: battlePhases.titleId })
+        phasesStats.inserted = inserted.length
+        phasesStats.titlesId = inserted.map((r) => r.titleId ?? '').filter(Boolean)
+      }
+    } else {
+      log.info(
+        { battleId: currentBattle.id, existingCount: existingPhases.length },
+        'enrich mode: existing phases present — skipped phase insert',
+      )
+    }
+  }
+
   // 9. INSERT new citations. We never DELETE old citations.
   const citationInserts = cites.map((c) => ({
     contentType: 'battle',
@@ -1515,6 +1860,13 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
       locationFilled,
       commanderFilled,
       citationsInserted: insertedCitationCount,
+      participantsAdded: participantStats.added.length,
+      participantsUpdated: participantStats.updated.length,
+      participantsSkipped: participantStats.skipped.length,
+      participants: participantStats,
+      phasesInserted: phasesStats.inserted,
+      phasesSoftDeleted: phasesStats.softDeleted,
+      phases: phasesStats,
       modelUsed,
     },
   }
@@ -1539,6 +1891,11 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
     citationsInserted: insertedCitationCount,
     locationFilled,
     commanderFilled,
+    participantsAdded: participantStats.added.length,
+    participantsUpdated: participantStats.updated.length,
+    participantsSkipped: participantStats.skipped.length,
+    phasesInserted: phasesStats.inserted,
+    phasesSoftDeleted: phasesStats.softDeleted,
   })
 }
 

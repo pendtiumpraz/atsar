@@ -56,6 +56,60 @@ export const battleExtractionSchema = z.object({
   narrativeId: z.string().max(4000).nullable(),
   significanceId: z.string().max(2000).nullable(),
 
+  // ── Participants (resolved on the worker via ILIKE on figures) ──────
+  //
+  // The AI emits free-text names plus a role + side. The worker tries to
+  // resolve each row's `figureNameId` / `figureNameAr` to an existing
+  // `figures.id` via case-insensitive ILIKE on `nameFullId` / `nameFullAr`.
+  // Unresolved rows are SKIPPED (with a warning); the full crawl flow will
+  // create those figures first, then a follow-up re-ingest picks them up.
+  participants: z
+    .array(
+      z.object({
+        figureNameId: z.string().min(2).max(160),
+        figureNameAr: z.string().min(2).max(160),
+        role: z.enum([
+          'commander',
+          'sub_commander',
+          'soldier',
+          'martyr',
+          'captured',
+          'wounded',
+          'witness',
+          'flag_bearer',
+          'envoy',
+        ]),
+        side: z.enum(['muslim', 'opponent', 'both']),
+        notesId: z.string().max(400).nullable(),
+        notesAr: z.string().max(400).nullable(),
+      }),
+    )
+    .max(50)
+    .optional(),
+
+  // ── Phases (chronological) ──────────────────────────────────────────
+  //
+  // `orderIndex` is 0-based and strictly increasing. `locationSlug` /
+  // `arrowFromSlug` / `arrowToSlug` are free-text slug guesses the worker
+  // resolves to `locations.id` via slug-equals lookup; failures fall back
+  // to null so the phase row still inserts.
+  phases: z
+    .array(
+      z.object({
+        orderIndex: z.number().int().min(0).max(50),
+        nameId: z.string().min(2).max(120),
+        nameAr: z.string().min(2).max(120),
+        narrativeId: z.string().min(10).max(2000),
+        narrativeAr: z.string().max(2000).nullable(),
+        locationSlug: z.string().max(120).nullable(),
+        arrowFromSlug: z.string().max(120).nullable(),
+        arrowToSlug: z.string().max(120).nullable(),
+        durationHours: z.number().int().min(0).max(2400).nullable(),
+      }),
+    )
+    .max(15)
+    .optional(),
+
   // ── Citations (per-fact provenance) ─────────────────────────────────
   citations: z
     .array(

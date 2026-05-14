@@ -17,6 +17,7 @@ import {
   battleTypeEnum,
   battleOutcomeEnum,
   battleParticipantRoleEnum,
+  battleSideEnum,
   contentStatusEnum,
   datePrecisionEnum,
 } from './enums.js'
@@ -66,6 +67,16 @@ export const battles = pgTable(
 )
 
 // ─── battle_phases ─────────────────────────────────────────────────
+//
+// `titleAr` / `titleId` carry the phase name; `descriptionAr` / `descriptionId`
+// the narrative. The AI re-ingest pipeline emits `nameAr/Id` + `narrativeAr/Id`
+// in its Zod contract — those map onto these existing columns (the worker
+// performs the rename at insert time so we don't need a parallel set of
+// columns).
+//
+// `arrowFromId` / `arrowToId` describe troop-movement vectors that the
+// `<BattleMap />` overlay draws as an animated SVG line. `durationHours`
+// drives the phase cards (e.g. "berlangsung 6 jam").
 export const battlePhases = pgTable(
   'battle_phases',
   {
@@ -79,11 +90,22 @@ export const battlePhases = pgTable(
     descriptionAr: text('description_ar'),
     descriptionId: text('description_id'),
     phaseLocationId: uuid('phase_location_id').references(() => locations.id),
+    arrowFromId: uuid('arrow_from_id').references(() => locations.id),
+    arrowToId: uuid('arrow_to_id').references(() => locations.id),
+    durationHours: integer('duration_hours'),
   },
   (t) => [index('battle_phases_battle_idx').on(t.battleId).where(sql`${t.deletedAt} IS NULL`)],
 )
 
 // ─── battle_participants ───────────────────────────────────────────
+//
+// Composite PK on (battleId, figureId) — a figure may appear in a battle
+// only once. Rows are append-only (no soft-delete columns); cascade hard
+// deletes through the battle/figure FKs.
+//
+// `side` defaults to 'muslim' because the entire pre-7.5.6 seed corpus is
+// Muslim-side. The AI re-ingest pipeline now writes the explicit side for
+// every newly-extracted row.
 export const battleParticipants = pgTable(
   'battle_participants',
   {
@@ -94,6 +116,7 @@ export const battleParticipants = pgTable(
       .notNull()
       .references(() => figures.id, { onDelete: 'cascade' }),
     role: battleParticipantRoleEnum('role').notNull(),
+    side: battleSideEnum('side').notNull().default('muslim'),
     notesAr: text('notes_ar'),
     notesId: text('notes_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

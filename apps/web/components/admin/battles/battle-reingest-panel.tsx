@@ -112,6 +112,27 @@ interface JobRow {
       citationsInserted?: number
       locationFilled?: boolean
       commanderFilled?: boolean
+      // Phase 7.5.6 — participants / phases sub-pipeline summary.
+      participantsAdded?: number
+      participantsUpdated?: number
+      participantsSkipped?: number
+      participants?: {
+        added?: {
+          figureId: string
+          nameId: string
+          nameAr: string
+          role: string
+        }[]
+        updated?: { figureId: string; nameId: string }[]
+        skipped?: { nameId: string; nameAr: string }[]
+      }
+      phasesInserted?: number
+      phasesSoftDeleted?: number
+      phases?: {
+        inserted?: number
+        softDeleted?: number
+        titlesId?: string[]
+      }
     }
   } | null
   /** AI-suggested patch — only present once status === 'completed'. */
@@ -145,6 +166,10 @@ const FOCUS_FIELD_GROUPS: FocusFieldGroup[] = [
   { id: 'outcome', label: 'Hasil' },
   { id: 'casualtiesMuslim', label: 'Korban muslim' },
   { id: 'casualtiesOpponent', label: 'Korban musuh' },
+  // Phase 7.5.6 — virtual focus fields driving the worker's
+  // battle_participants / battle_phases sub-pipelines.
+  { id: 'participants', label: 'Tokoh peserta' },
+  { id: 'phases', label: 'Fase pertempuran' },
   { id: 'citations', label: 'Sitasi' },
 ]
 
@@ -166,13 +191,23 @@ const FIELD_LABELS: Record<string, string> = {
   commanderId: 'Komandan',
   locationId: 'Lokasi',
   citations: 'Sitasi',
+  participants: 'Tokoh peserta',
+  phases: 'Fase pertempuran',
 }
 
 /** Fields that should never be patched directly by the diff dialog. Citations
  *  are append-only on the backend; commander/location are FK pickers, not
- *  free-text. The AI suggestion still surfaces for human review but the
- *  "Terima" button is disabled. */
-const NON_PATCHABLE_FIELDS = new Set(['citations', 'commanderId', 'locationId'])
+ *  free-text. Participants and phases are virtual focus fields — the worker
+ *  has already written the rows by the time the dialog opens, so "Terima"
+ *  is a no-op and we only expose "Tinjau" / "Tolak" via custom rendering.
+ *  The "Terima" button is disabled for all of these. */
+const NON_PATCHABLE_FIELDS = new Set([
+  'citations',
+  'commanderId',
+  'locationId',
+  'participants',
+  'phases',
+])
 
 /** Fields whose suggestion value is a long string — these get the
  *  `react-diff-viewer-continued` line-level highlight in side-by-side mode.
@@ -205,6 +240,33 @@ function previewValue(v: unknown): string {
   if (typeof v === 'object') return JSON.stringify(v).slice(0, 200)
   const s = String(v)
   return s.length > 240 ? `${s.slice(0, 240)}…` : s
+}
+
+/**
+ * Human-readable summary for the virtual participants/phases rows in the diff
+ * dialog. Falls back to the generic `previewValue` for every other key. */
+function previewForKey(key: string, v: unknown): string {
+  if (key === 'participants' && v && typeof v === 'object') {
+    const m = v as {
+      added?: unknown[]
+      updated?: unknown[]
+      skipped?: unknown[]
+    }
+    const parts = [
+      `${m.added?.length ?? 0} baru`,
+      `${m.updated?.length ?? 0} diperbarui`,
+      `${m.skipped?.length ?? 0} dilewati`,
+    ]
+    return parts.join(', ')
+  }
+  if (key === 'phases' && v && typeof v === 'object') {
+    const m = v as { inserted?: number; softDeleted?: number; titlesId?: string[] }
+    const parts: string[] = []
+    parts.push(`${m.inserted ?? 0} urutan baru`)
+    if (m.softDeleted) parts.push(`${m.softDeleted} fase lama disimpan`)
+    return parts.join(', ')
+  }
+  return previewValue(v)
 }
 
 function fullValue(v: unknown): string {
@@ -427,14 +489,28 @@ export function BattleReingestPanel({ slug, current }: BattleReingestPanelProps)
         if (parsed.status === 'completed') {
           stopPolling()
           setRecent(parsed)
-          if (parsed.suggestions && Object.keys(parsed.suggestions).length > 0) {
+          const m = parsed.payload?.metadata
+          const hasParticipantChanges =
+            (m?.participantsAdded ?? 0) > 0 ||
+            (m?.participantsUpdated ?? 0) > 0 ||
+            (m?.participantsSkipped ?? 0) > 0
+          const hasPhaseChanges =
+            (m?.phasesInserted ?? 0) > 0 || (m?.phasesSoftDeleted ?? 0) > 0
+          if (
+            (parsed.suggestions && Object.keys(parsed.suggestions).length > 0) ||
+            hasParticipantChanges ||
+            hasPhaseChanges
+          ) {
             toast.success('Saran AI siap. Tinjau diff di bawah.')
             setDiffOpen(true)
+            // Tokoh + Fase are written eagerly by the worker — refresh so the
+            // public detail page reflects the new rows when the dialog closes.
+            if (hasParticipantChanges || hasPhaseChanges) router.refresh()
           } else {
             // Worker may have already applied the patch directly (older
             // contract). Trigger a hard refresh so the page reflects new
             // values, but still surface a status toast.
-            const changed = parsed.payload?.metadata?.fieldsChanged ?? []
+            const changed = m?.fieldsChanged ?? []
             if (changed.length > 0) {
               toast.success(`AI selesai. ${changed.length} field diperbarui.`)
               router.refresh()
@@ -536,11 +612,23 @@ export function BattleReingestPanel({ slug, current }: BattleReingestPanelProps)
   const isRunning = polling || status === 'pending' || status === 'running'
   const meta = job?.payload?.metadata ?? recent?.payload?.metadata
 
-  /** Stable ordered list of suggestion entries — used by both views. */
+  /** Stable ordered list of suggestion entries — used by both views.
+   *  Phase 7.5.6: when the worker writes `metadata.participants` /
+   *  `metadata.phases`, we synthesise virtual rows so admins can review them
+   *  in the diff dialog even though the data is already in the database. */
   const suggestionEntries = React.useMemo(() => {
-    if (!job?.suggestions) return [] as [string, unknown][]
-    return Object.entries(job.suggestions)
-  }, [job?.suggestions])
+    const base: [string, unknown][] = job?.suggestions
+      ? Object.entries(job.suggestions)
+      : []
+    const m = job?.payload?.metadata
+    if (m?.participants && !base.some(([k]) => k === 'participants')) {
+      base.push(['participants', m.participants])
+    }
+    if (m?.phases && !base.some(([k]) => k === 'phases')) {
+      base.push(['phases', m.phases])
+    }
+    return base
+  }, [job?.suggestions, job?.payload?.metadata])
 
   const currentRecord = (current ?? {}) as Record<string, unknown>
 
@@ -723,6 +811,30 @@ export function BattleReingestPanel({ slug, current }: BattleReingestPanelProps)
                     {meta.citationsInserted} sitasi baru disisipkan.
                   </p>
                 ) : null}
+                {(meta?.participantsAdded ?? 0) > 0 ||
+                (meta?.participantsUpdated ?? 0) > 0 ||
+                (meta?.participantsSkipped ?? 0) > 0 ? (
+                  <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">
+                    Tokoh:{' '}
+                    <span className="font-medium text-[rgb(var(--text))]">
+                      {meta?.participantsAdded ?? 0} baru
+                    </span>
+                    {meta?.participantsUpdated ? `, ${meta.participantsUpdated} diperbarui` : ''}
+                    {meta?.participantsSkipped ? `, ${meta.participantsSkipped} dilewati` : ''}.
+                  </p>
+                ) : null}
+                {(meta?.phasesInserted ?? 0) > 0 || (meta?.phasesSoftDeleted ?? 0) > 0 ? (
+                  <p className="mt-1 text-xs text-[rgb(var(--text-muted))]">
+                    Fase:{' '}
+                    <span className="font-medium text-[rgb(var(--text))]">
+                      {meta?.phasesInserted ?? 0} urutan baru
+                    </span>
+                    {meta?.phasesSoftDeleted
+                      ? `, ${meta.phasesSoftDeleted} fase lama disimpan (soft-delete)`
+                      : ''}
+                    .
+                  </p>
+                ) : null}
                 {job.publishError ? (
                   <p className="mt-2 text-xs text-[rgb(var(--text-muted))]">
                     QStash publish gagal: <code>{job.publishError}</code>
@@ -863,8 +975,11 @@ function DiffTable({
                 </td>
                 <td className="px-3 py-2">
                   <div className="max-w-[20rem] whitespace-pre-wrap break-words">
-                    {previewValue(suggested)}
+                    {previewForKey(key, suggested)}
                   </div>
+                  {key === 'participants' || key === 'phases' ? (
+                    <ParticipantsPhasesDetail keyName={key} value={suggested} />
+                  ) : null}
                 </td>
                 <td className="px-3 py-2">
                   {state === 'accepted' ? (
@@ -978,8 +1093,11 @@ function DiffSideBySide({
                     Saran AI
                   </div>
                   <div className="whitespace-pre-wrap break-words text-sm text-[rgb(var(--text))]">
-                    {previewValue(suggested)}
+                    {previewForKey(key, suggested)}
                   </div>
+                  {key === 'participants' || key === 'phases' ? (
+                    <ParticipantsPhasesDetail keyName={key} value={suggested} />
+                  ) : null}
                 </div>
               </div>
             )}
@@ -1015,6 +1133,131 @@ function DiffSideBySide({
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ── Participants / Phases expandable detail ──────────────────────────
+//
+// Rendered inline inside both the table and side-by-side views. Defaults to
+// collapsed so the row stays compact; "Lihat" toggles it open.
+
+interface ParticipantsPhasesDetailProps {
+  keyName: 'participants' | 'phases'
+  value: unknown
+}
+
+function ParticipantsPhasesDetail({ keyName, value }: ParticipantsPhasesDetailProps) {
+  const [open, setOpen] = React.useState(false)
+  if (!value || typeof value !== 'object') return null
+
+  if (keyName === 'participants') {
+    const m = value as {
+      added?: { figureId: string; nameId: string; nameAr: string; role: string }[]
+      updated?: { figureId: string; nameId: string }[]
+      skipped?: { nameId: string; nameAr: string }[]
+    }
+    const total =
+      (m.added?.length ?? 0) + (m.updated?.length ?? 0) + (m.skipped?.length ?? 0)
+    if (total === 0) return null
+    return (
+      <div className="mt-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? 'Sembunyikan' : 'Lihat daftar'}
+        </Button>
+        {open ? (
+          <div className="mt-2 space-y-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-2 text-xs">
+            {m.added && m.added.length > 0 ? (
+              <div>
+                <div className="mb-1 font-semibold text-[rgb(var(--text))]">
+                  Baru ({m.added.length})
+                </div>
+                <ul className="ml-4 list-disc text-[rgb(var(--text-muted))]">
+                  {m.added.map((p) => (
+                    <li key={p.figureId}>
+                      {p.nameId}
+                      <span className="text-[rgb(var(--text-faint))]"> · {p.role}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {m.updated && m.updated.length > 0 ? (
+              <div>
+                <div className="mb-1 font-semibold text-[rgb(var(--text))]">
+                  Diperbarui ({m.updated.length})
+                </div>
+                <ul className="ml-4 list-disc text-[rgb(var(--text-muted))]">
+                  {m.updated.map((p) => (
+                    <li key={p.figureId}>{p.nameId}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {m.skipped && m.skipped.length > 0 ? (
+              <div>
+                <div className="mb-1 font-semibold text-[rgb(var(--text))]">
+                  Dilewati ({m.skipped.length}) — figure belum ada di DB
+                </div>
+                <ul className="ml-4 list-disc text-[rgb(var(--text-muted))]">
+                  {m.skipped.map((p, idx) => (
+                    <li key={`${p.nameId}-${idx}`}>
+                      {p.nameId} <span className="text-[rgb(var(--text-faint))]">/ {p.nameAr}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  // phases
+  const m = value as {
+    inserted?: number
+    softDeleted?: number
+    titlesId?: string[]
+  }
+  const titles = m.titlesId ?? []
+  if ((m.inserted ?? 0) === 0 && (m.softDeleted ?? 0) === 0) return null
+  return (
+    <div className="mt-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? 'Sembunyikan' : 'Lihat daftar'}
+      </Button>
+      {open ? (
+        <div className="mt-2 rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-2 text-xs">
+          {titles.length > 0 ? (
+            <ol className="ml-4 list-decimal text-[rgb(var(--text-muted))]">
+              {titles.map((t, idx) => (
+                <li key={`${t}-${idx}`}>{t}</li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-[rgb(var(--text-muted))]">
+              {m.inserted ?? 0} fase baru tersimpan.
+            </p>
+          )}
+          {(m.softDeleted ?? 0) > 0 ? (
+            <p className="mt-2 text-[rgb(var(--text-faint))]">
+              {m.softDeleted} fase lama disoft-delete (tersimpan di
+              originalSnapshot untuk dipulihkan).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

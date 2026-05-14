@@ -226,10 +226,31 @@ export const battleOutcomeEnum = pgEnum('battle_outcome_enum', [
 ])
 
 export const battleParticipantRoleEnum = pgEnum('battle_participant_role_enum', [
+  // Legacy roles (kept verbatim — seed data + curated rows still use these).
   'commander',
   'sahabat',
   'fallen',
   'captured',
+  // Extended roles emitted by the AI battle re-ingest pipeline. The worker
+  // maps every extracted participant onto one of these. See
+  // `apps/web/lib/server/ai/battle-schema.ts` for the contract.
+  'sub_commander',
+  'wounded',
+  'witness',
+  'flag_bearer',
+  'envoy',
+])
+
+/**
+ * Which side of a battle a participant fought on. Used by the public Tokoh
+ * tab to group rows under "Muslim" / "Pihak lawan" / "Kedua belah pihak".
+ * `'both'` is reserved for envoys, witnesses, or figures who switched sides
+ * mid-engagement.
+ */
+export const battleSideEnum = pgEnum('battle_side_enum', [
+  'muslim',
+  'opponent',
+  'both',
 ])
 
 export const pdfJobTypeEnum = pgEnum('pdf_job_type_enum', ['single', 'multi', 'category'])
