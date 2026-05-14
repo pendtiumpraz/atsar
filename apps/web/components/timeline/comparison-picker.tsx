@@ -25,7 +25,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { figuresApi, type Paginated } from '@/lib/api/endpoints'
 
-const MAX_FIGURES = 5
+const MAX_FIGURES = 12
 
 type ApiFigure = {
   id: string

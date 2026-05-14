@@ -49,7 +49,7 @@ export default async function TimelinePage({ searchParams }: TimelinePageProps) 
             Timeline Komparasi
           </h1>
           <p className="text-sm text-[rgb(var(--text-muted))]">
-            Pilih hingga 5 tokoh untuk dibandingkan rentang hidupnya pada satu sumbu waktu.
+            Pilih hingga 12 tokoh untuk dibandingkan rentang hidupnya pada satu sumbu waktu.
           </p>
         </div>
       </div>
