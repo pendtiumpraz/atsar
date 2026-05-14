@@ -793,6 +793,8 @@ async function handleFigureIngest(jobId: string): Promise<Response> {
 const MERGEABLE_FIELDS = [
   'nameFullAr',
   'nameFullId',
+  'nameShortAr',
+  'nameShortId',
   'kunyahAr',
   'kunyahId',
   'laqabAr',
@@ -801,14 +803,23 @@ const MERGEABLE_FIELDS = [
   'birthDateCe',
   'deathDateAh',
   'deathDateCe',
+  'deathCause',
   'socialCategory',
   'specialty',
   'madhab',
   'rijalGrade',
+  'rijalNotesAr',
+  'rijalNotesId',
+  'hadithCountMin',
+  'hadithCountMax',
   'summaryAr',
   'summaryId',
   'biographyAr',
   'biographyId',
+  'biographyPreWafatAr',
+  'biographyPreWafatId',
+  'biographyPostWafatAr',
+  'biographyPostWafatId',
 ] as const
 
 type MergeableField = (typeof MERGEABLE_FIELDS)[number]

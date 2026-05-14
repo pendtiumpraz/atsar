@@ -53,9 +53,22 @@ const rijalGradeValues = [
   'unverified',
 ] as const
 
+const deathCauseValues = [
+  'natural',
+  'martyred_battle',
+  'martyred_other',
+  'illness',
+  'plague',
+  'execution',
+  'accident',
+  'unknown',
+] as const
+
 const FigureExtractionSchema = z.object({
   nameFullAr: z.string().nullable(),
   nameFullId: z.string().nullable(),
+  nameShortAr: z.string().nullable(),
+  nameShortId: z.string().nullable(),
   kunyahAr: z.string().nullable(),
   kunyahId: z.string().nullable(),
   laqabAr: z.string().nullable(),
@@ -64,15 +77,24 @@ const FigureExtractionSchema = z.object({
   birthDateCe: z.number().int().nullable(),
   deathDateAh: z.number().int().nullable(),
   deathDateCe: z.number().int().nullable(),
+  deathCause: z.enum(deathCauseValues).nullable(),
   gender: z.enum(genderValues).nullable(),
   socialCategory: z.array(z.enum(socialCategoryValues)).nullable(),
   specialty: z.array(z.string()).nullable(),
   madhab: z.enum(madhabValues).nullable(),
   rijalGrade: z.enum(rijalGradeValues).nullable(),
+  rijalNotesAr: z.string().nullable(),
+  rijalNotesId: z.string().nullable(),
+  hadithCountMin: z.number().int().nullable(),
+  hadithCountMax: z.number().int().nullable(),
   summaryAr: z.string().nullable(),
   summaryId: z.string().nullable(),
   biographyAr: z.string().nullable(),
   biographyId: z.string().nullable(),
+  biographyPreWafatAr: z.string().nullable(),
+  biographyPreWafatId: z.string().nullable(),
+  biographyPostWafatAr: z.string().nullable(),
+  biographyPostWafatId: z.string().nullable(),
   /**
    * Ancestral lineage ("nasab") — ordered child → parent → grandparent → …
    * Each entry is one generation up. Only emit when the source explicitly
@@ -147,7 +169,41 @@ const SYSTEM_PROMPT = [
   '    matruk, majhul, unverified. Leave null when not stated.',
   '4. Names: keep `*Ar` fields in original Arabic script. `*Id` fields are standard Indonesian',
   '   transliteration (e.g. "أبو بكر الصديق" → "Abu Bakr ash-Shiddiq"). Do not paraphrase.',
-  '5. `biographyAr` / `biographyId`: keep concise (2-4 paragraphs), grounded in sources.',
+  '5. `summaryAr` / `summaryId`: 1-2 kalimat ringkas — siapa tokoh ini dalam satu nafas.',
+  '5b. `biographyAr` / `biographyId`: KOMPREHENSIF, bukan ringkasan. Target 6-10 paragraf',
+  '    bahasa Indonesia yang ngalir, dengan struktur:',
+  '    - Asal-usul, nasab, kelahiran (kapan, di mana, latar keluarga)',
+  '    - Masa muda, awal masuk Islam / awal menuntut ilmu',
+  '    - Guru-guru utama, perjalanan rihlah ilmiah',
+  '    - Kontribusi utama (riwayat hadits, kitab yang ditulis, fatwa, pertempuran, dll)',
+  '    - Murid-murid yang masyhur',
+  '    - Pendapat ulama tentangnya (jarh/ta\'dil bila ada)',
+  '    - Wafat (kapan, di mana, sebabnya bila disebut)',
+  '    - Warisan keilmuan / pengaruh setelah wafat',
+  '    Sertakan kutipan literal singkat dari sumber bila menyangkut sanjungan/celaan',
+  '    ulama. Tetap berpegang pada SOURCES — jangan menambah detail di luar sumber.',
+  '5c. `biographyAr` mengikuti struktur yang sama dalam bahasa Arab fushah. Bila sumber',
+  '    asli berbahasa Arab, prefer kutipan asli (jangan re-translate dari ID).',
+  '5d. `biographyPreWafatAr` / `biographyPreWafatId`: bagian biografi yang FOKUS pada',
+  '    kehidupan, kontribusi, peristiwa-peristiwa SEBELUM wafat. 3-5 paragraf.',
+  '    Bila sumber tidak memisahkan dengan jelas, ekstrak peristiwa yang terjadi',
+  '    semasa hidup tokoh (rihlah ilmiah, peperangan, fatwa, pengajaran).',
+  '5e. `biographyPostWafatAr` / `biographyPostWafatId`: bagian biografi tentang PASCA',
+  '    wafat — warisan kitab, murid yang melanjutkan, pengaruh keilmuan, komentar',
+  '    ulama setelah generasi tokoh wafat. 2-4 paragraf. Bila sumber tidak menyebut,',
+  '    biarkan null.',
+  '5f. `nameShortAr` / `nameShortId`: nama pendek populer yang lazim disebut (mis.',
+  '    "Bukhari" untuk Imam al-Bukhari, "Umar" untuk Umar bin al-Khattab). Tanpa kunyah.',
+  '5g. `rijalNotesAr` / `rijalNotesId`: kutipan singkat ulama tentang kredibilitas',
+  '    tokoh dalam periwayatan hadits (jarh wa ta\'dil). Mis. "قال أحمد: ثقة ثبت".',
+  '    Hanya bila sumber menyebut secara eksplisit.',
+  '5h. `hadithCountMin` / `hadithCountMax`: rentang jumlah hadits yang diriwayatkan.',
+  '    Bila sumber menyebut angka pasti, set min = max. Bila menyebut "lebih dari N",',
+  '    set min = N. Bila tidak ada angka, biarkan null.',
+  '5i. `deathCause`: sebab wafat bila disebut. Allowed: natural (wafat alami/usia',
+  '    tua), martyred_battle (syahid di medan perang), martyred_other (syahid bukan',
+  '    di perang, mis. dibunuh zalim), illness (sakit), plague (wabah/taun),',
+  '    execution (dihukum mati), accident (kecelakaan), unknown (tidak jelas).',
   '6. If sources conflict, prefer the higher-priority source; do NOT invent a synthesis.',
   '7. `nasabChain`: when sources EXPLICITLY list the ancestral lineage (Sirah Ibn',
   '   Hisham, biographical dictionaries, etc.), emit one entry per generation',
@@ -206,6 +262,14 @@ export async function extractFigureData(
     prompt: buildUserPrompt(name, sources),
     // Lower temperature: we want recall of source facts, not creativity.
     temperature: 0.1,
+    // Biography target is 6-10 paragraphs × 2 languages + nasabChain +
+    // citations array. Allow generous headroom so the model doesn't get
+    // cut off mid-sentence (which `generateObject` then refuses to parse).
+    maxTokens: 12_000,
+    // Force JSON mode — DeepSeek occasionally wraps tool-call JSON with
+    // prose preamble, which trips the parser.
+    mode: 'json',
+    maxRetries: 2,
   })
 
   const { citations, nasabChain, ...figureData } = object
@@ -221,6 +285,8 @@ function emptyFigureData(): Omit<FigureExtractionResult, 'citations' | 'nasabCha
   return {
     nameFullAr: null,
     nameFullId: null,
+    nameShortAr: null,
+    nameShortId: null,
     kunyahAr: null,
     kunyahId: null,
     laqabAr: null,
@@ -229,14 +295,23 @@ function emptyFigureData(): Omit<FigureExtractionResult, 'citations' | 'nasabCha
     birthDateCe: null,
     deathDateAh: null,
     deathDateCe: null,
+    deathCause: null,
     gender: null,
     socialCategory: null,
     specialty: null,
     madhab: null,
     rijalGrade: null,
+    rijalNotesAr: null,
+    rijalNotesId: null,
+    hadithCountMin: null,
+    hadithCountMax: null,
     summaryAr: null,
     summaryId: null,
     biographyAr: null,
     biographyId: null,
+    biographyPreWafatAr: null,
+    biographyPreWafatId: null,
+    biographyPostWafatAr: null,
+    biographyPostWafatId: null,
   }
 }

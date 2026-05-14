@@ -74,8 +74,14 @@ const DiffViewer = dynamic(
 const TEXT_DIFF_FIELDS = new Set([
   'biographyId',
   'biographyAr',
+  'biographyPreWafatId',
+  'biographyPreWafatAr',
+  'biographyPostWafatId',
+  'biographyPostWafatAr',
   'summaryId',
   'summaryAr',
+  'rijalNotesId',
+  'rijalNotesAr',
 ])
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -159,17 +165,42 @@ function expandFocusGroups(groupIds: Iterable<string>): string[] {
 }
 
 const FOCUS_FIELD_GROUPS: FocusFieldGroup[] = [
-  { id: 'biography', label: 'Biografi', columns: ['biographyId', 'biographyAr'] },
+  {
+    id: 'biography',
+    label: 'Biografi',
+    columns: [
+      'biographyId',
+      'biographyAr',
+      'biographyPreWafatId',
+      'biographyPreWafatAr',
+      'biographyPostWafatId',
+      'biographyPostWafatAr',
+    ],
+  },
   { id: 'summary', label: 'Ringkasan', columns: ['summaryId', 'summaryAr'] },
+  {
+    id: 'names',
+    label: 'Nama pendek',
+    columns: ['nameShortId', 'nameShortAr'],
+  },
   { id: 'kunyah', label: 'Kunyah / Laqab', columns: ['kunyahId', 'kunyahAr', 'laqabId', 'laqabAr'] },
   {
     id: 'dates',
     label: 'Tanggal lahir / wafat',
-    columns: ['birthDateAh', 'birthDateCe', 'deathDateAh', 'deathDateCe'],
+    columns: ['birthDateAh', 'birthDateCe', 'deathDateAh', 'deathDateCe', 'deathCause'],
   },
   { id: 'specialty', label: 'Spesialisasi', columns: ['specialty'] },
   { id: 'madhab', label: 'Madhab', columns: ['madhab'] },
-  { id: 'rijal', label: 'Rijal grade', columns: ['rijalGrade'] },
+  {
+    id: 'rijal',
+    label: 'Rijal grade + notes',
+    columns: ['rijalGrade', 'rijalNotesId', 'rijalNotesAr'],
+  },
+  {
+    id: 'hadith',
+    label: 'Jumlah hadits',
+    columns: ['hadithCountMin', 'hadithCountMax'],
+  },
   // Citation has no flat column — handled as a free-form suggestion the
   // admin can review but we cannot one-click apply yet. The Accept button
   // is disabled with a tooltip-ish hint.
@@ -179,6 +210,10 @@ const FOCUS_FIELD_GROUPS: FocusFieldGroup[] = [
 const FIELD_LABELS: Record<string, string> = {
   biographyId: 'Biografi (ID)',
   biographyAr: 'Biografi (AR)',
+  biographyPreWafatId: 'Biografi Pra-Wafat (ID)',
+  biographyPreWafatAr: 'Biografi Pra-Wafat (AR)',
+  biographyPostWafatId: 'Biografi Pasca-Wafat (ID)',
+  biographyPostWafatAr: 'Biografi Pasca-Wafat (AR)',
   summaryId: 'Ringkasan (ID)',
   summaryAr: 'Ringkasan (AR)',
   kunyahId: 'Kunyah (ID)',
@@ -189,12 +224,19 @@ const FIELD_LABELS: Record<string, string> = {
   birthDateCe: 'Lahir (M)',
   deathDateAh: 'Wafat (H)',
   deathDateCe: 'Wafat (M)',
+  deathCause: 'Sebab wafat',
   socialCategory: 'Kategori sosial',
   specialty: 'Spesialisasi',
   madhab: 'Madhab',
   rijalGrade: 'Rijal grade',
+  rijalNotesId: 'Catatan rijal (ID)',
+  rijalNotesAr: 'Catatan rijal (AR)',
+  hadithCountMin: 'Jumlah hadits (min)',
+  hadithCountMax: 'Jumlah hadits (max)',
   nameFullId: 'Nama lengkap (ID)',
   nameFullAr: 'Nama lengkap (AR)',
+  nameShortId: 'Nama pendek (ID)',
+  nameShortAr: 'Nama pendek (AR)',
   citations: 'Citation',
 }
 
