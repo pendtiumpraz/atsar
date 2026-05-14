@@ -619,7 +619,7 @@ function BulkAiUpdateDialog({
             <div className="flex gap-2">
               <Button
                 type="button"
-                variant={mode === 'enrich' ? 'default' : 'outline'}
+                variant={mode === 'enrich' ? 'primary' : 'outline'}
                 size="sm"
                 onClick={() => setMode('enrich')}
                 disabled={mutation.isPending}
@@ -628,7 +628,7 @@ function BulkAiUpdateDialog({
               </Button>
               <Button
                 type="button"
-                variant={mode === 'replace' ? 'default' : 'outline'}
+                variant={mode === 'replace' ? 'primary' : 'outline'}
                 size="sm"
                 onClick={() => setMode('replace')}
                 disabled={mutation.isPending}

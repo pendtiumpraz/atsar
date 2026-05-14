@@ -365,7 +365,10 @@ async function loadActiveWhitelist(): Promise<{ domain: string; priority: number
  */
 async function gatherSources(
   query: string,
-  log: ReturnType<typeof logger.child>,
+  log: {
+    warn: (...args: unknown[]) => void
+    debug: (...args: unknown[]) => void
+  },
 ): Promise<{ url: string; content: string }[]> {
   const domains = await loadActiveWhitelist()
   if (domains.length === 0) {

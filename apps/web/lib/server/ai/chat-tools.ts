@@ -23,12 +23,25 @@ import {
   figureCategories,
   figures,
   locations,
+  researchJobs,
   whitelistDomains,
 } from '@athar/db/schema'
 
 import { figureService } from '@/lib/server/services/figure.service'
 import { filterAllowedFigureIds } from '@/lib/server/services/content-access.service'
 import { searchWhitelist } from '@/lib/server/research'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
+import {
+  discoverBattleCandidates,
+  discoverFigureCandidates,
+  ingestBattle,
+  ingestBattlesBatch,
+  ingestFigure,
+  ingestFiguresBatch,
+  reingestBattle,
+  reingestFigure,
+  reingestFiguresBatch,
+} from '@/lib/server/services/figure-ingest.service'
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -456,3 +469,510 @@ export function chatTools(userId: string | null) {
 }
 
 export type ChatTools = ReturnType<typeof chatTools>
+
+// ── Admin tool factory ──────────────────────────────────────────────────
+//
+// Returns the WRITE tools that mutate the database via the existing
+// research-job pipeline. Each tool re-checks the caller's role inside
+// `execute()` as defence-in-depth — the chat route also gates by role
+// before mounting these tools, but a future regression there shouldn't
+// leak DB writes to non-admins.
+//
+// Returns research_jobs rows + QStash messages. The drafts land in
+// `/queue` for ustadz review; nothing here bypasses the editorial flow.
+
+const BATTLE_TYPE_VALUES = ['ghazwah', 'sariyyah', 'futuhat'] as const
+
+const FIGURE_REINGEST_FIELDS = [
+  'nameFullAr',
+  'nameFullId',
+  'kunyahAr',
+  'kunyahId',
+  'birthDateAh',
+  'deathDateAh',
+  'socialCategory',
+  'specialty',
+  'summaryAr',
+  'summaryId',
+  'biographyAr',
+  'biographyId',
+  'citations',
+] as const
+
+const BATTLE_REINGEST_FIELDS = [
+  'nameAr',
+  'nameId',
+  'eventDateAh',
+  'eventDateCe',
+  'eventDatePrecision',
+  'eventDateNotes',
+  'opponentForce',
+  'muslimCount',
+  'opponentCount',
+  'outcome',
+  'casualtiesMuslim',
+  'casualtiesOpponent',
+  'strategyId',
+  'narrativeId',
+  'significanceId',
+  'citations',
+] as const
+
+const RESEARCH_JOB_TYPES = [
+  'figure_ingest',
+  'figure_reingest',
+  'battle_ingest',
+  'battle_reingest',
+] as const
+
+/**
+ * Guard helper — throws inside a tool `execute()` if the caller is not an
+ * admin. We use a regular Error (not ApiError) because the AI SDK wraps
+ * tool errors and the message bubbles up to the model, which will report
+ * it to the user.
+ */
+async function assertAdmin(userId: string | null): Promise<void> {
+  if (!userId) {
+    throw new Error('Permission denied: chat tidak terotentikasi.')
+  }
+  const roles = await getUserRoleSlugs(userId)
+  if (!roles.has('admin')) {
+    throw new Error(
+      'Permission denied: tool ini hanya untuk admin Atsar.',
+    )
+  }
+}
+
+/**
+ * Build the admin-only WRITE tool map. The chat route merges these with
+ * `chatTools(userId)` for admin callers only — subscribers/anonymous never
+ * see these tool definitions.
+ */
+export function adminChatTools(userId: string | null) {
+  return {
+    // ── 1. Discover figures ──────────────────────────────────────────
+    // Phase 1 enumeration — does NOT write to DB. Safe to call without
+    // confirmation. Returns candidates filtered against EXCLUDE_LIST.
+    discover_figures: tool({
+      description:
+        'Enumerasi nama-nama tokoh untuk kategori tertentu dari whitelist salafi. ' +
+        'TIDAK menulis ke DB — hanya membaca + memanggil AI agent. ' +
+        'Gunakan SEBELUM ingest_figure_batch untuk dapatkan daftar kandidat. ' +
+        'Hasilnya sudah di-dedupe dari tokoh yang sudah ada di database.',
+      parameters: z.object({
+        category: z.enum(FIGURE_CATEGORIES),
+        gender: z.enum(['male', 'female']).optional(),
+        hints: z.string().max(500).optional(),
+        limit: z.number().int().min(1).max(100).default(30),
+      }),
+      execute: async ({ category, gender, hints, limit }) => {
+        await assertAdmin(userId)
+        const result = await discoverFigureCandidates(userId!, {
+          category,
+          gender,
+          hints,
+          limit,
+        })
+        return {
+          candidates: result.candidates,
+          existingCount: result.existingCount,
+          suggestedNew: result.suggestedNew,
+          sourcesFetched: result.sourcesFetched,
+        }
+      },
+    }),
+
+    // ── 2. Ingest single figure ──────────────────────────────────────
+    // Queue one crawl job. Confirm name + category with admin first.
+    ingest_figure: tool({
+      description:
+        'Antrekan crawl detail untuk SATU tokoh — membuat 1 row research_jobs (figure_ingest) + publish QStash. ' +
+        'Hasil akan muncul sebagai draft di /queue untuk ditinjau ustadz. ' +
+        'WAJIB minta konfirmasi admin sebelum dipanggil.',
+      parameters: z.object({
+        name: z.string().trim().min(2).max(160),
+        category: z.enum(FIGURE_CATEGORIES),
+        gender: z.enum(['male', 'female']).optional(),
+        hints: z.string().max(2000).optional(),
+      }),
+      execute: async ({ name, category, gender, hints }) => {
+        await assertAdmin(userId)
+        const result = await ingestFigure(userId!, {
+          name,
+          category,
+          gender,
+          hints,
+        })
+        return {
+          jobId: result.jobId,
+          status: 'pending' as const,
+          publishError: result.publishError,
+        }
+      },
+    }),
+
+    // ── 3. Ingest figures batch ──────────────────────────────────────
+    // Bulk variant. WAJIB tampilkan total + daftar singkat ke admin
+    // sebelum dipanggil (hemat AI credits).
+    ingest_figure_batch: tool({
+      description:
+        'Antrekan crawl detail untuk BANYAK tokoh sekaligus (max 50). ' +
+        'WAJIB konfirmasi total + tampilkan daftar singkat ke admin sebelum dipanggil. ' +
+        'Hemat AI credits.',
+      parameters: z.object({
+        items: z
+          .array(
+            z.object({
+              name: z.string().trim().min(2).max(160),
+              category: z.enum(FIGURE_CATEGORIES),
+              gender: z.enum(['male', 'female']).optional(),
+              hints: z.string().max(2000).optional(),
+            }),
+          )
+          .min(1)
+          .max(50),
+      }),
+      execute: async ({ items }) => {
+        await assertAdmin(userId)
+        const result = await ingestFiguresBatch(userId!, items)
+        return {
+          created: result.created,
+          queued: result.queued,
+          failures: result.failures,
+        }
+      },
+    }),
+
+    // ── 4. Re-ingest single figure ───────────────────────────────────
+    // Re-crawl existing figure. Confirm mode (enrich/replace) with admin.
+    reingest_figure: tool({
+      description:
+        'Re-crawl tokoh yang SUDAH ADA. Mode: "enrich" (isi kolom kosong saja) ' +
+        'atau "replace" (timpa). WAJIB tanya admin mode mana sebelum dipanggil.',
+      parameters: z.object({
+        slug: z
+          .string()
+          .min(1)
+          .max(160)
+          .regex(/^[a-z0-9-]+$/),
+        mode: z.enum(['enrich', 'replace']).default('enrich'),
+        focusFields: z.array(z.enum(FIGURE_REINGEST_FIELDS)).optional(),
+        hints: z.string().max(2000).optional(),
+      }),
+      execute: async ({ slug, mode, focusFields, hints }) => {
+        await assertAdmin(userId)
+        const result = await reingestFigure(userId!, {
+          slug,
+          mode,
+          focusFields,
+          hints,
+        })
+        return {
+          jobId: result.jobId,
+          status: 'pending' as const,
+          figureId: result.figureId,
+          mode: result.mode,
+          publishError: result.publishError,
+        }
+      },
+    }),
+
+    // ── 5. Re-ingest figures batch ───────────────────────────────────
+    reingest_figure_batch: tool({
+      description:
+        'Re-crawl BANYAK tokoh yang sudah ada (max 50). ' +
+        'WAJIB konfirmasi dengan admin: enrich atau replace?',
+      parameters: z.object({
+        slugs: z
+          .array(
+            z
+              .string()
+              .min(1)
+              .max(160)
+              .regex(/^[a-z0-9-]+$/),
+          )
+          .min(1)
+          .max(50),
+        mode: z.enum(['enrich', 'replace']).default('enrich'),
+        focusFields: z.array(z.enum(FIGURE_REINGEST_FIELDS)).optional(),
+        hints: z.string().max(2000).optional(),
+      }),
+      execute: async ({ slugs, mode, focusFields, hints }) => {
+        await assertAdmin(userId)
+        const result = await reingestFiguresBatch(userId!, {
+          slugs,
+          mode,
+          focusFields,
+          hints,
+        })
+        return {
+          created: result.created,
+          queued: result.queued,
+          failures: result.failures,
+        }
+      },
+    }),
+
+    // ── 6. Discover battles ──────────────────────────────────────────
+    discover_battles: tool({
+      description:
+        'Enumerasi nama-nama peperangan (ghazwah/sariyyah/futuhat) dari whitelist. ' +
+        'TIDAK menulis ke DB. Hasil sudah di-dedupe terhadap battles existing.',
+      parameters: z.object({
+        type: z.enum(BATTLE_TYPE_VALUES).optional(),
+        era: z.string().max(60).optional(),
+        hints: z.string().max(500).optional(),
+        limit: z.number().int().min(1).max(100).default(30),
+      }),
+      execute: async ({ type, era, hints, limit }) => {
+        await assertAdmin(userId)
+        const result = await discoverBattleCandidates(userId!, {
+          type,
+          era,
+          hints,
+          limit,
+        })
+        return {
+          candidates: result.candidates,
+          existingCount: result.existingCount,
+          suggestedNew: result.suggestedNew,
+          sourcesFetched: result.sourcesFetched,
+        }
+      },
+    }),
+
+    // ── 7. Ingest single battle ──────────────────────────────────────
+    ingest_battle: tool({
+      description:
+        'Antrekan crawl detail untuk SATU sirah perang. ' +
+        'WAJIB konfirmasi nama + type sebelum dipanggil.',
+      parameters: z.object({
+        name: z.string().trim().min(2).max(160),
+        type: z.enum(BATTLE_TYPE_VALUES).optional(),
+        hints: z.string().max(2000).optional(),
+      }),
+      execute: async ({ name, type, hints }) => {
+        await assertAdmin(userId)
+        const result = await ingestBattle(userId!, { name, type, hints })
+        return {
+          jobId: result.jobId,
+          status: 'pending' as const,
+          publishError: result.publishError,
+        }
+      },
+    }),
+
+    // ── 8. Ingest battles batch ──────────────────────────────────────
+    ingest_battle_batch: tool({
+      description:
+        'Antrekan crawl detail untuk BANYAK sirah perang sekaligus (max 50). ' +
+        'WAJIB konfirmasi total + daftar singkat sebelum dipanggil.',
+      parameters: z.object({
+        items: z
+          .array(
+            z.object({
+              name: z.string().trim().min(2).max(160),
+              type: z.enum(BATTLE_TYPE_VALUES).optional(),
+              hints: z.string().max(2000).optional(),
+            }),
+          )
+          .min(1)
+          .max(50),
+      }),
+      execute: async ({ items }) => {
+        await assertAdmin(userId)
+        const result = await ingestBattlesBatch(userId!, items)
+        return {
+          created: result.created,
+          queued: result.queued,
+          failures: result.failures,
+        }
+      },
+    }),
+
+    // ── 9. Re-ingest single battle ───────────────────────────────────
+    reingest_battle: tool({
+      description:
+        'Re-crawl sirah perang yang sudah ada. Mode: enrich atau replace. ' +
+        'WAJIB tanya admin mode mana.',
+      parameters: z.object({
+        slug: z
+          .string()
+          .min(1)
+          .max(160)
+          .regex(/^[a-z0-9-]+$/),
+        mode: z.enum(['enrich', 'replace']).default('enrich'),
+        focusFields: z.array(z.enum(BATTLE_REINGEST_FIELDS)).optional(),
+        hints: z.string().max(2000).optional(),
+      }),
+      execute: async ({ slug, mode, focusFields, hints }) => {
+        await assertAdmin(userId)
+        const result = await reingestBattle(userId!, {
+          slug,
+          mode,
+          focusFields,
+          hints,
+        })
+        return {
+          jobId: result.jobId,
+          status: 'pending' as const,
+          battleId: result.battleId,
+          mode: result.mode,
+          publishError: result.publishError,
+        }
+      },
+    }),
+
+    // ── 10. List pending jobs (read-only helper) ─────────────────────
+    // Admin can ask the model "berapa banyak job yang masih berjalan?";
+    // the model calls this and reports back. Filters to the calling user
+    // so admins only see their own pipeline.
+    list_pending_jobs: tool({
+      description:
+        'Lihat status job research yang sedang berjalan/baru selesai. ' +
+        'Read-only — gunakan untuk lapor progress ke admin. ' +
+        'Hanya menampilkan job yang admin ini buat sendiri.',
+      parameters: z.object({
+        type: z.enum(RESEARCH_JOB_TYPES).optional(),
+        limit: z.number().int().min(1).max(50).default(10),
+      }),
+      execute: async ({ type, limit }) => {
+        await assertAdmin(userId)
+        const conds = [
+          eq(researchJobs.createdBy, userId!),
+          isNull(researchJobs.deletedAt),
+        ]
+        if (type) conds.push(eq(researchJobs.type, type))
+
+        const rows = await db
+          .select({
+            id: researchJobs.id,
+            type: researchJobs.type,
+            status: researchJobs.status,
+            payload: researchJobs.payload,
+            errorMessage: researchJobs.errorMessage,
+            startedAt: researchJobs.startedAt,
+            finishedAt: researchJobs.finishedAt,
+            createdAt: researchJobs.createdAt,
+            resultFigureId: researchJobs.resultFigureId,
+          })
+          .from(researchJobs)
+          .where(and(...conds))
+          .orderBy(desc(researchJobs.createdAt))
+          .limit(limit)
+
+        return {
+          count: rows.length,
+          jobs: rows.map((r) => {
+            const p = (r.payload ?? {}) as {
+              name?: string
+              slug?: string
+              category?: string
+              type?: string
+              mode?: string
+            }
+            return {
+              jobId: r.id,
+              type: r.type,
+              status: r.status,
+              name: p.name ?? null,
+              slug: p.slug ?? null,
+              category: p.category ?? null,
+              battleType: p.type ?? null,
+              mode: p.mode ?? null,
+              startedAt: r.startedAt?.toISOString() ?? null,
+              finishedAt: r.finishedAt?.toISOString() ?? null,
+              createdAt: r.createdAt?.toISOString() ?? null,
+              errorMessage: r.errorMessage ?? null,
+              resultId: r.resultFigureId ?? null,
+            }
+          }),
+        }
+      },
+    }),
+
+    // ── 11. Recent drafts (read-only helper) ─────────────────────────
+    // After a batch ingest, admin can ask "tokoh apa saja yang baru jadi
+    // draft?" — the model fans this out across figures + battles and
+    // reports the latest.
+    get_recent_drafts: tool({
+      description:
+        'Lihat draft tokoh & perang terbaru hasil crawl. ' +
+        'Read-only — untuk konfirmasi hasil setelah ingest.',
+      parameters: z.object({
+        limit: z.number().int().min(1).max(50).default(10),
+      }),
+      execute: async ({ limit }) => {
+        await assertAdmin(userId)
+
+        // Use a raw SQL `IN` so the enum type widens correctly — Drizzle's
+        // typed `inArray` requires the const-tuple literal type at the call
+        // site, but we want a reusable status list.
+        const figureRows = await db
+          .select({
+            slug: figures.slug,
+            nameFullId: figures.nameFullId,
+            nameFullAr: figures.nameFullAr,
+            categorySlug: figureCategories.slug,
+            status: figures.status,
+            createdAt: figures.createdAt,
+          })
+          .from(figures)
+          .innerJoin(
+            figureCategories,
+            eq(figureCategories.id, figures.categoryId),
+          )
+          .where(
+            and(
+              isNull(figures.deletedAt),
+              sql`${figures.status} IN ('draft','under_review','needs_edit')`,
+            ),
+          )
+          .orderBy(desc(figures.createdAt))
+          .limit(limit)
+
+        const battleRows = await db
+          .select({
+            slug: battles.slug,
+            nameId: battles.nameId,
+            nameAr: battles.nameAr,
+            type: battles.type,
+            status: battles.status,
+            createdAt: battles.createdAt,
+          })
+          .from(battles)
+          .where(
+            and(
+              isNull(battles.deletedAt),
+              sql`${battles.status} IN ('draft','under_review','needs_edit')`,
+            ),
+          )
+          .orderBy(desc(battles.createdAt))
+          .limit(limit)
+
+        return {
+          figures: figureRows.map((r) => ({
+            kind: 'figure' as const,
+            slug: r.slug,
+            nameId: r.nameFullId,
+            nameAr: r.nameFullAr,
+            category: r.categorySlug,
+            status: r.status,
+            createdAt: r.createdAt?.toISOString() ?? null,
+          })),
+          battles: battleRows.map((r) => ({
+            kind: 'battle' as const,
+            slug: r.slug,
+            nameId: r.nameId,
+            nameAr: r.nameAr,
+            type: r.type,
+            status: r.status,
+            createdAt: r.createdAt?.toISOString() ?? null,
+          })),
+        }
+      },
+    }),
+  }
+}
+
+export type AdminChatTools = ReturnType<typeof adminChatTools>

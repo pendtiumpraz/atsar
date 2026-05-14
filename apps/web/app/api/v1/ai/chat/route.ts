@@ -32,8 +32,12 @@ import {
   calculateCredits,
 } from '@athar/ai'
 
-import { ATSAR_CHAT_SYSTEM_PROMPT } from '@/lib/server/ai/system-prompt'
-import { chatTools } from '@/lib/server/ai/chat-tools'
+import {
+  ATSAR_CHAT_ADMIN_MODE_ADDENDUM,
+  ATSAR_CHAT_SYSTEM_PROMPT,
+} from '@/lib/server/ai/system-prompt'
+import { adminChatTools, chatTools } from '@/lib/server/ai/chat-tools'
+import { getUserRoleSlugs } from '@/lib/server/rbac/permissions'
 
 // ─── Validation ────────────────────────────────────────────────────────────
 // `content` is capped at 4000 chars — long convos are where prompt injection
@@ -209,16 +213,30 @@ export const POST = withErrorHandling(async (req) => {
       ? firstUserMsg.content.slice(0, 280)
       : null
 
+  // ─── Resolve role → admin gets WRITE tools + admin-mode prompt ─────
+  // Admin chat is the only path that can trigger DB mutation. Subscriber
+  // chat stays read-only. We do the role lookup AFTER abuse detection so
+  // a malicious caller can't burn the RBAC cache lookup as a side-channel.
+  const roles = await getUserRoleSlugs(userId)
+  const isAdmin = roles.has('admin')
+  const tools = isAdmin
+    ? { ...chatTools(userId), ...adminChatTools(userId) }
+    : chatTools(userId)
+  const systemPrompt = isAdmin
+    ? `${ATSAR_CHAT_SYSTEM_PROMPT}\n${ATSAR_CHAT_ADMIN_MODE_ADDENDUM}`
+    : ATSAR_CHAT_SYSTEM_PROMPT
+
   // ─── Stream with tools (RAG) ──────────────────────────────────────────
   const result = streamText({
     model,
-    system: ATSAR_CHAT_SYSTEM_PROMPT,
+    system: systemPrompt,
     messages,
-    tools: chatTools(userId),
-    // Let the model chain up to 5 tool calls before composing the answer.
-    // Practical ceiling: search_figures → get_figure_detail → search_battles
-    // → search_locations → final summarization is the worst-case path.
-    maxSteps: 5,
+    tools,
+    // Admin workflows need: discover → present → confirm → batch ingest →
+    // list_pending → report (6 steps). Subscriber path tops out at 5 (READ
+    // tools chain). Bump uniformly to 10 to give the model headroom for
+    // multi-step plans without forcing premature finalization.
+    maxSteps: 10,
     toolChoice: 'auto',
     // Hard caps. DeepSeek's default is creative + verbose; pin to factual.
     maxTokens: 2048,

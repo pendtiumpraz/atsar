@@ -114,7 +114,16 @@ function toSdkMessages(messages: ReadonlyArray<StoredMessage>): Message[] {
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-export function ChatShell() {
+interface ChatShellProps {
+  /**
+   * When true, the shell shows the admin-mode banner explaining that the
+   * chat has access to write tools (discover/ingest). The actual gating is
+   * server-side in `/api/v1/ai/chat`; this is purely a UI hint.
+   */
+  isAdmin?: boolean
+}
+
+export function ChatShell({ isAdmin = false }: ChatShellProps) {
   // Conversation list (hydrates from localStorage on mount — keep [] on SSR
   // so the server-rendered markup matches the first client paint).
   const [conversations, setConversations] = useState<StoredConversation[]>([])
@@ -286,6 +295,24 @@ export function ChatShell() {
             Sisa kuota →
           </Link>
         </header>
+
+        {isAdmin ? (
+          <div
+            className="border-b border-[rgb(var(--border))] bg-[rgb(var(--surface-muted,var(--surface)))] px-4 py-2 text-xs text-[rgb(var(--text-muted))]"
+            role="note"
+          >
+            <span className="font-semibold text-[rgb(var(--accent))]">
+              Mode Admin
+            </span>
+            {' — '}
+            kamu bisa minta AI untuk tambah/perbarui tokoh & perang via tool.
+            Contoh:{' '}
+            <span className="italic">
+              &ldquo;Tambahkan semua shahabiyat pencerita hadits yang belum ada
+              di database.&rdquo;
+            </span>
+          </div>
+        ) : null}
 
         <MessageList messages={messages} isLoading={isLoading} error={error} />
 
