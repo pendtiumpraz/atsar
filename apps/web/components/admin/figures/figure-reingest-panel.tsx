@@ -139,8 +139,11 @@ interface FocusFieldGroup {
   /** Indonesian label shown in the form. */
   label: string
   /** Columns on the figure row this group covers — also the keys we expect
-   *  the AI to put in `suggestions`. */
-  columns: (keyof FigureReingestCurrentSnapshot)[]
+   *  the AI to put in `suggestions`. Plain string[] (not
+   *  `keyof FigureReingestCurrentSnapshot`) because the snapshot interface
+   *  has an `[extra: string]: unknown` index signature that widens `keyof`
+   *  to `string | number`, which then trips `Set<string>.add()`. */
+  columns: readonly string[]
 }
 
 /** Expand group ids → flat list of DB column names the backend Zod
