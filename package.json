@@ -23,7 +23,7 @@
     "db:studio": "pnpm --filter @athar/db studio",
     "db:check": "pnpm --filter @athar/db check",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
-    "hooks:install": "git config core.hooksPath .githooks"
+    "prepare": "node -e \"if (!process.env.CI && !process.env.VERCEL) { try { require('child_process').execSync('npx husky', { stdio: 'ignore' }) } catch {} }\""
   },
   "lint-staged": {
     "apps/web/**/*.{ts,tsx}": [
@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "husky": "^9.1.7",
     "lint-staged": "^17.0.4",
     "prettier": "^3.4.1",
     "prettier-plugin-tailwindcss": "^0.6.9",

@@ -1,0 +1,17 @@
+# Pre-push: FULL Next.js build (same command Vercel runs).
+# Catches "Module not found" and other build-time errors that tsc alone
+# misses because Next has its own resolver. Green hook = green deploy.
+# Skipped on fresh clones / CI.
+
+command -v pnpm >/dev/null 2>&1 || exit 0
+
+echo "→ pre-push: next build (apps/web) — match Vercel exactly"
+pnpm --filter @athar/web build || {
+  echo ""
+  echo "✗ Build failed. Pushing now would break Vercel."
+  echo "  Fix the errors above OR use 'git push --no-verify' in"
+  echo "  emergencies (and then watch Vercel like a hawk)."
+  exit 1
+}
+
+echo "✓ pre-push OK"

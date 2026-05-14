@@ -1,0 +1,19 @@
+# Pre-commit: fast TS typecheck + lint-staged on staged files.
+# Keeps the bulk-build cost for pre-push; this one needs to be quick so
+# devs don't dread the keystroke.
+#
+# Skip if pnpm isn't on PATH (fresh clone / CI worktree).
+
+command -v pnpm >/dev/null 2>&1 || exit 0
+
+echo "→ pre-commit: tsc --noEmit"
+pnpm typecheck || {
+  echo ""
+  echo "✗ Typecheck failed. Fix the TS errors above before committing."
+  exit 1
+}
+
+echo "→ pre-commit: lint-staged"
+pnpm exec lint-staged || exit 1
+
+echo "✓ pre-commit OK"
