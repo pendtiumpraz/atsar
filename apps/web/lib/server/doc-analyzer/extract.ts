@@ -131,6 +131,12 @@ export async function analyzeDocText(
     schema: ExtractionResultSchema,
     system: SYSTEM_PROMPT,
     prompt: `Document text:\n\n${text}`,
+    // A single PDF can yield 20-50 distinct figures × bilingual fields.
+    // SDK default (~4k) truncates mid-array; 16k matches the figure
+    // extractor's budget so multi-page books finish in one call.
+    maxTokens: 16_000,
+    mode: 'json',
+    maxRetries: 2,
   })
 
   const durationMs = Date.now() - startedAt

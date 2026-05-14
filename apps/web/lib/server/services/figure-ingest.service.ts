@@ -1111,6 +1111,10 @@ export async function discoverFigureCandidates(
   promptLines.push('')
   promptLines.push('Hasilkan daftar kandidat sesuai schema.')
 
+  // Scale `maxTokens` with the requested limit so a `limit=100` ask doesn't
+  // truncate mid-array. Each candidate ~120 tokens (nameAr+nameId+optional
+  // kunyah/laqab/shortHint + JSON scaffolding) plus 800 for the wrapper.
+  const dynamicMaxTokens = Math.min(16_000, Math.max(4_000, 800 + limit * 150))
   let llmResult
   try {
     llmResult = await generateObject({
@@ -1119,8 +1123,9 @@ export async function discoverFigureCandidates(
       system: DISCOVERY_SYSTEM_PROMPT,
       prompt: promptLines.join('\n'),
       temperature: 0.3,
-      maxTokens: 4_000,
-      maxRetries: 1,
+      maxTokens: dynamicMaxTokens,
+      mode: 'json',
+      maxRetries: 2,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1360,6 +1365,10 @@ export async function discoverBattleCandidates(
   promptLines.push('')
   promptLines.push('Hasilkan daftar kandidat sesuai schema.')
 
+  // Same dynamic sizing as figure discovery — battles have a longer
+  // `shortHint` field (because admin needs context like "perang di Khaybar
+  // 7H") so we bump the per-candidate budget slightly.
+  const dynamicMaxTokens = Math.min(16_000, Math.max(4_000, 800 + limit * 180))
   let llmResult
   try {
     llmResult = await generateObject({
@@ -1368,8 +1377,9 @@ export async function discoverBattleCandidates(
       system: BATTLE_DISCOVER_SYSTEM_PROMPT,
       prompt: promptLines.join('\n'),
       temperature: 0.3,
-      maxTokens: 4_000,
-      maxRetries: 1,
+      maxTokens: dynamicMaxTokens,
+      mode: 'json',
+      maxRetries: 2,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

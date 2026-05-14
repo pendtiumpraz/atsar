@@ -152,6 +152,81 @@ async function tryFallbackTier(
   return { kind: 'no_match' }
 }
 
+// Battle-equivalent of `tryFallbackTier` / `tryExtractFigure` — the figure
+// helpers can't be reused because they call `extractFigureData` and check
+// `nameFullAr/Id`. Battles use `extractBattleData` and check `nameAr/nameId`.
+type ExtractBattleAttempt =
+  | { result: Awaited<ReturnType<typeof extractBattleData>> }
+  | { failure: BattleExtractionFailure }
+
+interface BattleExtractionFailure {
+  code: 'provider_not_configured' | 'internal_error'
+  message: string
+}
+
+type BattleSuccess = { result: Awaited<ReturnType<typeof extractBattleData>> }
+type BattleFallbackTierResult =
+  | { kind: 'accepted'; fetched: FetchedSource[]; attempt: BattleSuccess }
+  | { kind: 'rate_limited'; err: RateLimitExceededError }
+  | { kind: 'failure'; failure: BattleExtractionFailure }
+  | { kind: 'no_match' }
+
+async function tryExtractBattle(
+  name: string,
+  sources: FetchedSource[],
+  hints: string | undefined,
+  log: JobLogger,
+): Promise<ExtractBattleAttempt | null> {
+  if (sources.length === 0) return null
+  try {
+    const result = await extractBattleData(name, sources, hints)
+    return { result }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'CONFLICT'
+    ) {
+      log.error({ err: message }, 'agent role not configured for battle extractor')
+      return {
+        failure: {
+          code: 'provider_not_configured',
+          message:
+            'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
+        },
+      }
+    }
+    log.error({ err: message }, 'LLM battle extraction threw')
+    return { failure: { code: 'internal_error', message } }
+  }
+}
+
+async function tryFallbackTierBattle(
+  name: string,
+  urls: string[],
+  hints: string | undefined,
+  log: JobLogger,
+  label: string,
+): Promise<BattleFallbackTierResult> {
+  if (urls.length === 0) return { kind: 'no_match' }
+  const fetch = await fetchSources(urls, log, label)
+  if (fetch.rateLimited) return { kind: 'rate_limited', err: fetch.rateLimited }
+  if (fetch.fetched.length === 0) return { kind: 'no_match' }
+  const attempt = await tryExtractBattle(name, fetch.fetched, hints, log)
+  if (!attempt) return { kind: 'no_match' }
+  if ('failure' in attempt) return { kind: 'failure', failure: attempt.failure }
+  // Accept only when the AI produced a non-empty battle name in either
+  // language — same gate as `tryFallbackTier` for figures.
+  const nameAr = attempt.result.battleData.nameAr?.trim() ?? ''
+  const nameId = attempt.result.battleData.nameId?.trim() ?? ''
+  if (nameAr.length > 0 || nameId.length > 0) {
+    return { kind: 'accepted', fetched: fetch.fetched, attempt }
+  }
+  return { kind: 'no_match' }
+}
+
 async function tryExtractFigure(
   name: string,
   sources: FetchedSource[],
@@ -159,17 +234,12 @@ async function tryExtractFigure(
   log: JobLogger,
 ): Promise<ExtractFigureAttempt | null> {
   if (sources.length === 0) return null
-  const hinted = hints
-    ? [
-        ...sources,
-        {
-          url: 'admin://hints',
-          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hints}`,
-        },
-      ]
-    : sources
   try {
-    const result = await extractFigureData(name, hinted)
+    // Hints are forwarded via the `hints` argument so they end up in the
+    // user-prompt body (extract.ts:buildUserPrompt) — NOT as a fake source
+    // with `url: 'admin://hints'`. The non-http scheme would otherwise leak
+    // into citations and confuse the model.
+    const result = await extractFigureData(name, sources, hints)
     return { result }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -483,6 +553,28 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     }
   }
 
+  // Anti-hallucination guard: if the AI produced biography/summary content
+  // but didn't cite any source, treat the extraction as ungrounded and bail
+  // so we don't persist a fabricated draft.
+  const hasBodyText = Boolean(
+    figureData.biographyAr ||
+      figureData.biographyId ||
+      figureData.summaryAr ||
+      figureData.summaryId,
+  )
+  if (hasBodyText && cites.length === 0) {
+    log.warn(
+      { figureName: input.figureName },
+      'extractor produced body text without citations — likely hallucination',
+    )
+    return {
+      ok: false,
+      code: 'extraction_empty',
+      message:
+        'AI menulis biografi tanpa kutipan sumber — kemungkinan halusinasi. Coba ulangi.',
+    }
+  }
+
   // ── 4. Insert draft + citations (Neon HTTP batch) ───────────────────
   // Neon-http does not expose `db.transaction()` — using `db.batch` keeps
   // both writes in a single round-trip.  We need the figure id before
@@ -562,7 +654,10 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     extractedAt: new Date(),
   }))
   if (citationInserts.length > 0) {
-    await db.insert(citations).values(citationInserts)
+    // Idempotent against the (content_type, content_id, source_url,
+    // COALESCE(field_path, '')) partial unique index — re-runs collapse
+    // onto the same row instead of spamming the Sumber tab.
+    await db.insert(citations).values(citationInserts).onConflictDoNothing()
   }
 
   // ── 4b. Nasab chain — INSERT figure_relations rows ──────────────────
@@ -855,6 +950,7 @@ const MERGEABLE_FIELDS = [
   'deathDateAh',
   'deathDateCe',
   'deathCause',
+  'gender',
   'socialCategory',
   'specialty',
   'madhab',
@@ -1135,6 +1231,28 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
 
   const { figureData, citations: cites, modelUsed } = extractionAttempt.result
 
+  // Anti-hallucination guard: refuse to persist body text without
+  // citations. Symmetric with the same check in `runResearch`.
+  const hasBodyText = Boolean(
+    figureData.biographyAr ||
+      figureData.biographyId ||
+      figureData.summaryAr ||
+      figureData.summaryId,
+  )
+  if (hasBodyText && cites.length === 0) {
+    const msg =
+      'AI menulis biografi tanpa kutipan sumber — kemungkinan halusinasi. Coba ulangi.'
+    log.warn(
+      { jobId, figureId: payload.figureId },
+      'figure reingest produced body text without citations — aborting',
+    )
+    await markFailed(jobId, 'extraction_empty', msg)
+    return Response.json(
+      { ok: false, error: { code: 'EXTRACTION_EMPTY', message: msg } },
+      { status: 422 },
+    )
+  }
+
   // 7. Build the per-mode merge patch.
   const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
   // In replace mode an admin must specify which fields to overwrite (empty
@@ -1272,9 +1390,12 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   }))
   let insertedCitationCount = 0
   if (citationInserts.length > 0) {
+    // Idempotent against `citations_unique_active_idx` — re-running
+    // re-ingest no longer spams duplicates.
     const inserted = await db
       .insert(citations)
       .values(citationInserts)
+      .onConflictDoNothing()
       .returning({ id: citations.id })
     insertedCitationCount = inserted.length
   }
@@ -1415,35 +1536,135 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
     )
   }
 
-  // 5. Candidate URLs via the same whitelist crawler used for figures.
-  const domains = await loadActiveWhitelist()
-  let candidateUrls = await searchWhitelist(payload.name, domains)
-  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
+  // 5. Build admin hints — forwarded into the user-prompt body, NOT as a
+  //    fake source with `url: 'admin://hints'`. The non-http scheme would
+  //    otherwise leak into citations and confuse the model.
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (payload.type) {
+    hintParts.push(`Jenis pertempuran yang diharapkan: ${payload.type}.`)
+  }
+  const combinedHints = hintParts.length > 0 ? hintParts.join('\n') : undefined
 
-  // 6. Fetch sources with per-domain rate limiting.
-  const fetched: { url: string; content: string }[] = []
-  for (const url of candidateUrls) {
-    if (fetched.length >= MAX_SOURCES) break
-    try {
-      const res = await fetchPage(url)
-      fetched.push({ url: res.finalUrl, content: res.html })
-    } catch (err) {
-      if (err instanceof RateLimitExceededError) {
-        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
-        await markFailed(jobId, 'rate_limited', err.message)
+  // 6. Whitelist sources first (same vetted domains used for figures), then
+  //    fall back to DDG tier-A (within whitelist) and tier-B (broader salafi)
+  //    when the whitelist URLs don't yield a usable extraction. Without the
+  //    fallback ladder, narratives come back nearly empty whenever the
+  //    direct whitelist URL probe misses.
+  const domains = await loadActiveWhitelist()
+  const whitelistUrls = (await searchWhitelist(payload.name, domains)).slice(
+    0,
+    MAX_SOURCES * 2,
+  )
+
+  const whitelistFetch = await fetchSources(whitelistUrls, log, 'whitelist')
+  if (whitelistFetch.rateLimited) {
+    await markFailed(jobId, 'rate_limited', whitelistFetch.rateLimited.message)
+    return Response.json(
+      { ok: false, error: { code: 'RATE_LIMITED', message: whitelistFetch.rateLimited.message } },
+      {
+        status: 429,
+        headers: {
+          'retry-after': String(Math.ceil(whitelistFetch.rateLimited.retryAfterMs / 1000)),
+        },
+      },
+    )
+  }
+
+  let fetched: FetchedSource[] = whitelistFetch.fetched
+  let extraction: BattleSuccess | null = null
+  if (fetched.length > 0) {
+    const initial = await tryExtractBattle(payload.name, fetched, combinedHints, log)
+    if (initial && 'failure' in initial) {
+      const failure = initial.failure
+      const httpStatus = failure.code === 'provider_not_configured' ? 503 : 500
+      await markFailed(jobId, failure.code, failure.message)
+      return Response.json(
+        { ok: false, error: { code: failure.code.toUpperCase(), message: failure.message } },
+        { status: httpStatus },
+      )
+    }
+    if (initial) extraction = initial
+  }
+
+  // 7. Fallback ladder — DDG within whitelist (tier A), then broader salafi
+  //    search (tier B). Symmetric with `runResearch` for figures.
+  const needsFallback =
+    !extraction ||
+    (!extraction.result.battleData.nameAr &&
+      !extraction.result.battleData.nameId)
+  if (needsFallback) {
+    const topDomains = [...domains]
+      .sort((a, b) => b.priority - a.priority)
+      .map((d) => d.domain)
+
+    log.warn(
+      { jobId, name: payload.name },
+      'battle whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+    )
+    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
+      limit: MAX_SOURCES * 2,
+    })
+    const tierA = await tryFallbackTierBattle(
+      payload.name,
+      tierAUrls,
+      combinedHints,
+      log,
+      'ddg-within-whitelist',
+    )
+    const applyTier = async (
+      tier: BattleFallbackTierResult,
+    ): Promise<Response | { applied: boolean }> => {
+      if (tier.kind === 'rate_limited') {
+        await markFailed(jobId, 'rate_limited', tier.err.message)
         return Response.json(
-          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          { ok: false, error: { code: 'RATE_LIMITED', message: tier.err.message } },
           {
             status: 429,
-            headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) },
+            headers: {
+              'retry-after': String(Math.ceil(tier.err.retryAfterMs / 1000)),
+            },
           },
         )
       }
-      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+      if (tier.kind === 'failure') {
+        const failure = tier.failure
+        const httpStatus = failure.code === 'provider_not_configured' ? 503 : 500
+        await markFailed(jobId, failure.code, failure.message)
+        return Response.json(
+          { ok: false, error: { code: failure.code.toUpperCase(), message: failure.message } },
+          { status: httpStatus },
+        )
+      }
+      if (tier.kind === 'accepted') {
+        fetched = tier.fetched
+        extraction = tier.attempt
+        return { applied: true }
+      }
+      return { applied: false }
+    }
+
+    const aOutcome = await applyTier(tierA)
+    if (aOutcome instanceof Response) return aOutcome
+    if (!aOutcome.applied) {
+      log.warn(
+        { jobId, name: payload.name },
+        'tier A yielded nothing — tier B: broader DDG salaf search',
+      )
+      const tierBUrls = await webSearchSalafi(payload.name, { limit: MAX_SOURCES * 2 })
+      const tierB = await tryFallbackTierBattle(
+        payload.name,
+        tierBUrls,
+        combinedHints,
+        log,
+        'ddg-salaf',
+      )
+      const bOutcome = await applyTier(tierB)
+      if (bOutcome instanceof Response) return bOutcome
     }
   }
 
-  if (fetched.length === 0) {
+  if (!extraction) {
     const msg =
       'Tidak ada sumber yang dapat dikutip untuk sirah perang ini. Tambahkan domain whitelist atau ubah ejaan nama.'
     await markFailed(jobId, 'no_sources', msg)
@@ -1453,62 +1674,33 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
     )
   }
 
-  // 7. Build hinted source set — admin hint + optional type hint biases
-  //    the LLM without changing the schema contract.
-  const hintParts: string[] = []
-  if (payload.hints) hintParts.push(payload.hints)
-  if (payload.type) {
-    hintParts.push(`Jenis pertempuran yang diharapkan: ${payload.type}.`)
-  }
-  const hintedSources = hintParts.length > 0
-    ? [
-        ...fetched,
-        {
-          url: 'admin://hints',
-          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
-        },
-      ]
-    : fetched
+  const { battleData, citations: cites, modelUsed } = extraction.result
 
-  // 8. LLM extract.
-  let extraction
-  try {
-    extraction = await extractBattleData(payload.name, hintedSources)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code?: string }).code === 'CONFLICT'
-    ) {
-      log.error({ err: message }, 'agent role not configured')
-      await markFailed(jobId, 'provider_not_configured', message)
-      return Response.json(
-        {
-          ok: false,
-          error: {
-            code: 'PROVIDER_NOT_CONFIGURED',
-            message:
-              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
-          },
-        },
-        { status: 503 },
-      )
-    }
-    log.error({ err: message }, 'LLM extraction threw')
-    await markFailed(jobId, 'internal_error', message)
+  // 8. Validate the LLM actually identified the battle.
+  if (!battleData.nameAr && !battleData.nameId) {
+    const msg = 'Sumber yang diambil tidak cocok dengan perang — coba sempurnakan ejaan.'
+    await markFailed(jobId, 'extraction_empty', msg)
     return Response.json(
-      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
-      { status: 500 },
+      { ok: false, error: { code: 'EXTRACTION_EMPTY', message: msg } },
+      { status: 422 },
     )
   }
 
-  const { battleData, citations: cites, modelUsed } = extraction
-
-  // 9. Validate the LLM actually identified the battle.
-  if (!battleData.nameAr && !battleData.nameId) {
-    const msg = 'Sumber yang diambil tidak cocok dengan perang — coba sempurnakan ejaan.'
+  // 8b. Anti-hallucination guard — narrative/strategy text without citations
+  //     means the LLM invented content. Bail before we persist a draft.
+  const hasBattleBody = Boolean(
+    battleData.narrativeAr ||
+      battleData.narrativeId ||
+      battleData.strategyAr ||
+      battleData.strategyId,
+  )
+  if (hasBattleBody && cites.length === 0) {
+    const msg =
+      'AI menulis narasi perang tanpa kutipan sumber — kemungkinan halusinasi. Coba ulangi.'
+    log.warn(
+      { jobId, name: payload.name },
+      'battle extractor produced body without citations — aborting',
+    )
     await markFailed(jobId, 'extraction_empty', msg)
     return Response.json(
       { ok: false, error: { code: 'EXTRACTION_EMPTY', message: msg } },
@@ -1563,8 +1755,11 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
       casualtiesMuslim: battleData.casualtiesMuslim ?? null,
       casualtiesOpponent: battleData.casualtiesOpponent ?? null,
       strategyId: battleData.strategyId ?? null,
+      strategyAr: battleData.strategyAr ?? null,
       narrativeId: battleData.narrativeId ?? null,
+      narrativeAr: battleData.narrativeAr ?? null,
       significanceId: battleData.significanceId ?? null,
+      significanceAr: battleData.significanceAr ?? null,
       status: 'draft',
       createdBy: job.createdBy ?? null,
     })
@@ -1594,9 +1789,11 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
   }))
   let insertedCitationCount = 0
   if (citationInserts.length > 0) {
+    // Idempotent against `citations_unique_active_idx`.
     const inserted = await db
       .insert(citations)
       .values(citationInserts)
+      .onConflictDoNothing()
       .returning({ id: citations.id })
     insertedCitationCount = inserted.length
   }
@@ -1644,8 +1841,11 @@ const BATTLE_MERGEABLE_FIELDS = [
   'casualtiesMuslim',
   'casualtiesOpponent',
   'strategyId',
+  'strategyAr',
   'narrativeId',
+  'narrativeAr',
   'significanceId',
+  'significanceAr',
 ] as const
 
 type BattleMergeableField = (typeof BATTLE_MERGEABLE_FIELDS)[number]
@@ -1796,35 +1996,134 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
     )
   }
 
-  // 5. Run the AI extraction. Don't reuse the ingest helper — it INSERTs a
-  //    new row; we only UPDATE.
-  const domains = await loadActiveWhitelist()
-  let candidateUrls = await searchWhitelist(payload.name, domains)
-  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
+  // 5. Hints + ladder. Don't reuse the ingest helper — it INSERTs a new row;
+  //    we only UPDATE here. Otherwise the source pipeline (whitelist → DDG
+  //    tier-A → tier-B) is identical.
+  const focusList = payload.focusFields ?? []
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (focusList.length > 0) {
+    hintParts.push(`Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`)
+  }
+  // Hints land in the user-prompt body (extract-battle.ts:buildUserPrompt),
+  // never as a fake `admin://hints` source — the non-http URL would leak
+  // into citations otherwise.
+  const combinedHints = hintParts.length > 0 ? hintParts.join('\n') : undefined
 
-  const fetched: { url: string; content: string }[] = []
-  for (const url of candidateUrls) {
-    if (fetched.length >= MAX_SOURCES) break
-    try {
-      const res = await fetchPage(url)
-      fetched.push({ url: res.finalUrl, content: res.html })
-    } catch (err) {
-      if (err instanceof RateLimitExceededError) {
-        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
-        await markFailed(jobId, 'rate_limited', err.message)
+  const domains = await loadActiveWhitelist()
+  const whitelistUrls = (await searchWhitelist(payload.name, domains)).slice(
+    0,
+    MAX_SOURCES * 2,
+  )
+
+  const whitelistFetch = await fetchSources(whitelistUrls, log, 'whitelist')
+  if (whitelistFetch.rateLimited) {
+    await markFailed(jobId, 'rate_limited', whitelistFetch.rateLimited.message)
+    return Response.json(
+      { ok: false, error: { code: 'RATE_LIMITED', message: whitelistFetch.rateLimited.message } },
+      {
+        status: 429,
+        headers: {
+          'retry-after': String(Math.ceil(whitelistFetch.rateLimited.retryAfterMs / 1000)),
+        },
+      },
+    )
+  }
+
+  let fetched: FetchedSource[] = whitelistFetch.fetched
+  let extractionAttempt: BattleSuccess | null = null
+  if (fetched.length > 0) {
+    const initial = await tryExtractBattle(payload.name, fetched, combinedHints, log)
+    if (initial && 'failure' in initial) {
+      const failure = initial.failure
+      const httpStatus = failure.code === 'provider_not_configured' ? 503 : 500
+      await markFailed(jobId, failure.code, failure.message)
+      return Response.json(
+        { ok: false, error: { code: failure.code.toUpperCase(), message: failure.message } },
+        { status: httpStatus },
+      )
+    }
+    if (initial) extractionAttempt = initial
+  }
+
+  // 6. Fallback ladder — DDG within whitelist (tier A), then broader salafi
+  //    search (tier B). Mirrors `handleBattleIngest`.
+  const needsFallback =
+    !extractionAttempt ||
+    (!extractionAttempt.result.battleData.nameAr &&
+      !extractionAttempt.result.battleData.nameId)
+  if (needsFallback) {
+    const topDomains = [...domains]
+      .sort((a, b) => b.priority - a.priority)
+      .map((d) => d.domain)
+
+    log.warn(
+      { jobId, name: payload.name },
+      'battle reingest whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+    )
+    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
+      limit: MAX_SOURCES * 2,
+    })
+    const tierA = await tryFallbackTierBattle(
+      payload.name,
+      tierAUrls,
+      combinedHints,
+      log,
+      'ddg-within-whitelist',
+    )
+    const applyTier = async (
+      tier: BattleFallbackTierResult,
+    ): Promise<Response | { applied: boolean }> => {
+      if (tier.kind === 'rate_limited') {
+        await markFailed(jobId, 'rate_limited', tier.err.message)
         return Response.json(
-          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          { ok: false, error: { code: 'RATE_LIMITED', message: tier.err.message } },
           {
             status: 429,
-            headers: { 'retry-after': String(Math.ceil(err.retryAfterMs / 1000)) },
+            headers: {
+              'retry-after': String(Math.ceil(tier.err.retryAfterMs / 1000)),
+            },
           },
         )
       }
-      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+      if (tier.kind === 'failure') {
+        const failure = tier.failure
+        const httpStatus = failure.code === 'provider_not_configured' ? 503 : 500
+        await markFailed(jobId, failure.code, failure.message)
+        return Response.json(
+          { ok: false, error: { code: failure.code.toUpperCase(), message: failure.message } },
+          { status: httpStatus },
+        )
+      }
+      if (tier.kind === 'accepted') {
+        fetched = tier.fetched
+        extractionAttempt = tier.attempt
+        return { applied: true }
+      }
+      return { applied: false }
+    }
+
+    const aOutcome = await applyTier(tierA)
+    if (aOutcome instanceof Response) return aOutcome
+    if (!aOutcome.applied) {
+      log.warn(
+        { jobId, name: payload.name },
+        'tier A yielded nothing — tier B: broader DDG salaf search',
+      )
+      const tierBUrls = await webSearchSalafi(payload.name, { limit: MAX_SOURCES * 2 })
+      const tierB = await tryFallbackTierBattle(
+        payload.name,
+        tierBUrls,
+        combinedHints,
+        log,
+        'ddg-salaf',
+      )
+      const bOutcome = await applyTier(tierB)
+      if (bOutcome instanceof Response) return bOutcome
     }
   }
 
-  if (fetched.length === 0) {
+  if (!extractionAttempt) {
     const msg =
       'Tidak ada sumber yang dapat dikutip untuk sirah perang ini. Tambahkan domain whitelist atau ubah ejaan nama.'
     await markFailed(jobId, 'no_sources', msg)
@@ -1834,56 +2133,29 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
     )
   }
 
-  const focusList = payload.focusFields ?? []
-  const hintParts: string[] = []
-  if (payload.hints) hintParts.push(payload.hints)
-  if (focusList.length > 0) {
-    hintParts.push(`Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`)
-  }
-  const hintedSources = hintParts.length > 0
-    ? [
-        ...fetched,
-        {
-          url: 'admin://hints',
-          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
-        },
-      ]
-    : fetched
+  const { battleData, citations: cites, modelUsed } = extractionAttempt.result
 
-  let extraction
-  try {
-    extraction = await extractBattleData(payload.name, hintedSources)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code?: string }).code === 'CONFLICT'
-    ) {
-      log.error({ err: message }, 'agent role not configured')
-      await markFailed(jobId, 'provider_not_configured', message)
-      return Response.json(
-        {
-          ok: false,
-          error: {
-            code: 'PROVIDER_NOT_CONFIGURED',
-            message:
-              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
-          },
-        },
-        { status: 503 },
-      )
-    }
-    log.error({ err: message }, 'LLM extraction threw')
-    await markFailed(jobId, 'internal_error', message)
+  // Anti-hallucination guard — same gate as `handleBattleIngest`. Refuse
+  // to merge narrative/strategy body text that arrives without citations.
+  const hasBattleBody = Boolean(
+    battleData.narrativeAr ||
+      battleData.narrativeId ||
+      battleData.strategyAr ||
+      battleData.strategyId,
+  )
+  if (hasBattleBody && cites.length === 0) {
+    const msg =
+      'AI menulis narasi perang tanpa kutipan sumber — kemungkinan halusinasi. Coba ulangi.'
+    log.warn(
+      { jobId, battleId: payload.battleId },
+      'battle reingest produced body without citations — aborting',
+    )
+    await markFailed(jobId, 'extraction_empty', msg)
     return Response.json(
-      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
-      { status: 500 },
+      { ok: false, error: { code: 'EXTRACTION_EMPTY', message: msg } },
+      { status: 422 },
     )
   }
-
-  const { battleData, citations: cites, modelUsed } = extraction
 
   // 6. Per-mode merge patch.
   const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
@@ -2224,9 +2496,11 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
   }))
   let insertedCitationCount = 0
   if (citationInserts.length > 0) {
+    // Idempotent against `citations_unique_active_idx`.
     const inserted = await db
       .insert(citations)
       .values(citationInserts)
+      .onConflictDoNothing()
       .returning({ id: citations.id })
     insertedCitationCount = inserted.length
   }

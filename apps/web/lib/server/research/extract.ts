@@ -221,6 +221,23 @@ const SYSTEM_PROMPT = [
   'RULES (NON-NEGOTIABLE):',
   '1. You may use ONLY information that is literally present in the SOURCES the user provides.',
   '   Do NOT use your own background knowledge. If a fact is not in the sources, return null.',
+  '1b. `gender`: \'male\' atau \'female\' bila sumber jelas (nama, kata ganti, konteks).',
+  '    Bila ambigu (mis. nama unisex tanpa kunyah, tidak ada kata ganti spesifik)',
+  '    biarkan null — JANGAN menebak.',
+  '1c. `socialCategory`: array multi-pilih dari kelompok sosial yang relevan dengan tokoh.',
+  '    Allowed values:',
+  '    - \'anshar\'         → warga asli Madinah (Aus & Khazraj) yang menerima Nabi ﷺ',
+  '    - \'muhajirin\'      → sahabat yang hijrah dari Makkah ke Madinah',
+  '    - \'qurasy\'         → keturunan suku Quraisy (termasuk Bani Hasyim, Umayyah, dll)',
+  '    - \'arab_non_qurasy\' → Arab di luar Quraisy (Tamim, Azd, Hawazin, dll)',
+  '    - \'mawla\'          → budak yang dimerdekakan / klien suku (mis. Salim mawla Abi Hudzaifah)',
+  '    - \'non_arab\'       → non-Arab seperti Persia, Romawi, Habasyah (mis. Salman al-Farisi)',
+  '    - \'other\'          → tidak masuk kategori di atas',
+  '    Boleh banyak (mis. seorang muhajir dari Quraisy → [\'muhajirin\', \'qurasy\']). Bila sumber tidak menyebut, biarkan null.',
+  '1d. `specialty`: array string spesialisasi keilmuan tokoh. Gunakan kategori SATU KATA',
+  '    dari {hadits, fiqh, tafsir, aqidah, lughah, tarikh, lain-lain} — lowercase canonical.',
+  '    Mis. ulama hadits + fiqh → ["hadits", "fiqh"]. Bila sumber tidak menyebut atau',
+  '    tokoh bukan ulama, biarkan null.',
   '2. For every field you fill, you MUST add an entry to the `citations` array pointing to the',
   '   source URL it came from, plus a short Arabic excerpt (and Indonesian translation if obvious).',
   '3. Dates: emit BOTH `birthDateAh`/`deathDateAh` (Hijri year) AND `birthDateCe`/`deathDateCe`',
@@ -304,9 +321,18 @@ const SYSTEM_PROMPT = [
   'with an empty citations array. Returning null is always preferable to guessing.',
 ].join('\n')
 
-function buildUserPrompt(name: string, sources: ExtractionSource[]): string {
+function buildUserPrompt(
+  name: string,
+  sources: ExtractionSource[],
+  hints?: string | undefined,
+): string {
   const lines: string[] = []
   lines.push(`Target figure: ${name}`)
+  if (hints && hints.trim().length > 0) {
+    lines.push('')
+    lines.push('ADMIN HINTS (konteks tambahan — bukan sumber yang boleh dikutip):')
+    lines.push(hints.trim())
+  }
   lines.push('')
   lines.push('SOURCES (each delimited by ---):')
   for (const s of sources) {
@@ -331,6 +357,7 @@ function buildUserPrompt(name: string, sources: ExtractionSource[]): string {
 export async function extractFigureData(
   name: string,
   sources: ExtractionSource[],
+  hints?: string | undefined,
 ): Promise<ExtractFigureDataResult> {
   if (sources.length === 0) {
     return {
@@ -348,13 +375,15 @@ export async function extractFigureData(
     model,
     schema: FigureExtractionSchema,
     system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt(name, sources),
+    prompt: buildUserPrompt(name, sources, hints),
     // Lower temperature: we want recall of source facts, not creativity.
     temperature: 0.1,
-    // Biography target is 6-10 paragraphs × 2 languages + nasabChain +
-    // citations array. Allow generous headroom so the model doesn't get
-    // cut off mid-sentence (which `generateObject` then refuses to parse).
-    maxTokens: 12_000,
+    // Biography target is 6-10 paragraphs × 2 languages + pre/post wafat
+    // narratives + nasabChain + figureLocations + relations + citations.
+    // Long-form ulama biographies (Bukhari, Ibn Hajar) easily hit 12-15k
+    // output tokens; 16k gives headroom before generateObject refuses to
+    // parse a truncated payload.
+    maxTokens: 16_000,
     // Force JSON mode — DeepSeek occasionally wraps tool-call JSON with
     // prose preamble, which trips the parser.
     mode: 'json',

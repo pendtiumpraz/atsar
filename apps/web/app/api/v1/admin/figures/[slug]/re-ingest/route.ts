@@ -45,6 +45,7 @@ const RE_INGEST_FIELDS = [
   'deathDateAh',
   'deathDateCe',
   'deathCause',
+  'gender',
   'socialCategory',
   'specialty',
   'madhab',

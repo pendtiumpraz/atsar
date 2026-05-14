@@ -46,15 +46,40 @@ const SYSTEM_PROMPT = [
   '   `citations` array pointing to the source URL plus a short Indonesian-language excerpt.',
   '3. Dates use the Hijri (AH) calendar — convert if the source explicitly gives a Hijri year.',
   '   If only Gregorian (CE) is given, leave the AH field null.',
+  '3b. `eventDatePrecision`: presisi tanggal yang sumber berikan. Allowed values:',
+  '    - \'year\'        → hanya tahun (mis. "2 H")',
+  '    - \'month\'       → sampai bulan (mis. "Ramadhan 2 H")',
+  '    - \'day\'         → sampai hari (mis. "17 Ramadhan 2 H")',
+  '    - \'approximate\' → taqriban / sekitar (mis. "sekitar tahun 2 H")',
+  '    - \'range\'       → rentang tahun (mis. "antara 2-3 H")',
+  '    Biarkan null bila sumber tidak menyebut presisi.',
   '4. `type` MUST be one of: ghazwah (Nabi ﷺ memimpin), sariyyah (Nabi ﷺ tidak ikut, hanya',
   '   sahabat), futuhat (penaklukan setelah era Nabi ﷺ).',
   '5. `outcome` MUST be one of: victory, defeat, truce, partial. Default to null if ambiguous.',
+  '5b. `opponentForce`: deskripsi bebas pihak lawan dalam Bahasa Indonesia (mis. "Pasukan',
+  '    Quraisy Makkah", "Bani Quraizhah", "Pasukan Romawi Heraklius"). Maks 200 karakter.',
+  '    Biarkan null bila sumber tidak menyebut.',
+  '5c. `muslimCount` / `opponentCount` / `casualtiesMuslim` / `casualtiesOpponent`:',
+  '    isi angka HANYA bila sumber menyebut secara eksplisit. JANGAN menebak atau',
+  '    menginterpolasi dari deskripsi kualitatif ("pasukan besar"). Bila tidak disebut,',
+  '    biarkan null.',
   '6. `locationSlug` is a lowercase kebab-case slug guess (e.g. "badar", "uhud", "yarmuk").',
   '   The downstream resolver will match this to the `locations` table — leave it null if',
   '   you cannot identify the venue from the sources.',
   '7. `commanderName` is the free-text commander name as it appears in the source (Arabic',
   '   script or Indonesian transliteration is fine).',
-  '8. `narrativeId` is concise (2-4 paragraphs in Indonesian), grounded in the sources.',
+  '8. Narasi — KOMPREHENSIF, bukan ringkasan. Setiap field utama punya dua bahasa:',
+  '   - `narrativeId` / `narrativeAr`: 8-15 paragraf yang mengalir kronologis:',
+  '     latar belakang → pasukan yang dikumpulkan → keberangkatan → posisi taktis →',
+  '     fase-fase pertempuran → korban → penyelesaian → konsekuensi langsung.',
+  '     Bila sumber memberi dialog/kutipan, sertakan literal.',
+  '   - `strategyId` / `strategyAr`: 3-5 paragraf khusus strategi militer dan',
+  '     keputusan komandan. Untuk Badar: pemilihan sumur, formasi pemanah.',
+  '   - `significanceId` / `significanceAr`: 2-4 paragraf dampak teologis-historis',
+  '     (mis. Badar = pembeda haq & bathil, Uhud = pelajaran ketaatan, Khaibar =',
+  '     akhir konfrontasi Yahudi Madinah).',
+  '   Untuk *Ar fields gunakan bahasa Arab fushah; bila sumber asli Arab, prefer',
+  '   kutipan asli alih-alih back-translate dari Indonesia.',
   '9. If sources conflict, prefer the higher-priority source; do NOT invent a synthesis.',
   '10. Untuk `participants`: ekstrak HANYA tokoh yang sumber salaf menyebut',
   '    namanya secara eksplisit ikut dalam perang ini. JANGAN mengarang',
@@ -74,9 +99,18 @@ const SYSTEM_PROMPT = [
   'null with an empty citations array. Returning null is always preferable to guessing.',
 ].join('\n')
 
-function buildUserPrompt(name: string, sources: BattleExtractionSource[]): string {
+function buildUserPrompt(
+  name: string,
+  sources: BattleExtractionSource[],
+  hints?: string | undefined,
+): string {
   const lines: string[] = []
   lines.push(`Target battle: ${name}`)
+  if (hints && hints.trim().length > 0) {
+    lines.push('')
+    lines.push('ADMIN HINTS (konteks tambahan — bukan sumber yang boleh dikutip):')
+    lines.push(hints.trim())
+  }
   lines.push('')
   lines.push('SOURCES (each delimited by ---):')
   for (const s of sources) {
@@ -101,6 +135,7 @@ function buildUserPrompt(name: string, sources: BattleExtractionSource[]): strin
 export async function extractBattleData(
   name: string,
   sources: BattleExtractionSource[],
+  hints?: string | undefined,
 ): Promise<ExtractBattleDataResult> {
   if (sources.length === 0) {
     return {
@@ -117,9 +152,18 @@ export async function extractBattleData(
     model,
     schema: battleExtractionSchema,
     system: SYSTEM_PROMPT,
-    prompt: buildUserPrompt(name, sources),
+    prompt: buildUserPrompt(name, sources, hints),
     // Lower temperature: we want recall of source facts, not creativity.
     temperature: 0.1,
+    // Comprehensive narratives × 2 languages (narrative 8-15 paragraphs,
+    // strategy 3-5, significance 2-4) + up to 50 participants + 15 phases
+    // (each phase has Ar+Id narrative up to 2000 chars) + citations.
+    // Khaibar/Hunain-class battles easily hit 16-20k output tokens.
+    maxTokens: 24_000,
+    // Force JSON mode — DeepSeek's tool-call schema discipline is weaker
+    // than its JSON-mode discipline, and prose wrappers fail the parser.
+    mode: 'json',
+    maxRetries: 2,
   })
 
   const { citations, ...battleData } = object
@@ -151,7 +195,10 @@ function emptyBattleData(name: string): BattleExtractionData {
     casualtiesMuslim: null,
     casualtiesOpponent: null,
     strategyId: null,
+    strategyAr: null,
     narrativeId: null,
+    narrativeAr: null,
     significanceId: null,
+    significanceAr: null,
   }
 }

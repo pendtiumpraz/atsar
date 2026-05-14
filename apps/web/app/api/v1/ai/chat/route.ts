@@ -239,7 +239,10 @@ export const POST = withErrorHandling(async (req) => {
     maxSteps: 10,
     toolChoice: 'auto',
     // Hard caps. DeepSeek's default is creative + verbose; pin to factual.
-    maxTokens: 2048,
+    // 4k gives headroom for multi-paragraph answers that summarise tool-call
+    // results (search_figures / reingest_figure etc.) without truncating
+    // mid-bullet — 2k was occasionally cut off mid-answer.
+    maxTokens: 4096,
     temperature: 0.3,
     maxRetries: 1,
     onFinish: async ({ usage, finishReason }) => {

@@ -51,10 +51,16 @@ export const battleExtractionSchema = z.object({
   casualtiesMuslim: z.number().int().nullable(),
   casualtiesOpponent: z.number().int().nullable(),
 
-  // ── Narrative (Indonesian only — Arabic backfilled manually) ────────
-  strategyId: z.string().max(2000).nullable(),
-  narrativeId: z.string().max(4000).nullable(),
-  significanceId: z.string().max(2000).nullable(),
+  // ── Narrative (Indonesian + Arabic) ─────────────────────────────────
+  // Both languages emitted by the LLM when sources support it. Length
+  // caps generous so a multi-phase battle (Hunain, Khaibar) can carry
+  // a proper account without truncation.
+  strategyId: z.string().max(4000).nullable(),
+  strategyAr: z.string().max(4000).nullable(),
+  narrativeId: z.string().max(12000).nullable(),
+  narrativeAr: z.string().max(12000).nullable(),
+  significanceId: z.string().max(4000).nullable(),
+  significanceAr: z.string().max(4000).nullable(),
 
   // ── Participants (resolved on the worker via ILIKE on figures) ──────
   //
