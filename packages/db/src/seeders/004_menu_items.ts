@@ -23,6 +23,12 @@ const MENU: MenuSeed[] = [
     path: '/dashboard',
     displayOrder: 10,
   },
+  // Figure sub-categories (Nabi/Sahabat/Shahabiyat/Tabi'in/…) now live as
+  // <FigureCategoryTabs> pills on /figures itself — duplicating them in
+  // the sidebar made the nav noisy AND used a stale query-param shape
+  // (?cat=…&g=… instead of the canonical ?category=…&gender=…). Children
+  // kept as is_active=false rows so the menu-admin UI can re-enable any
+  // single category if a future admin wants it back as a shortcut.
   {
     slug: 'figures',
     labelId: 'Tokoh',
@@ -31,14 +37,14 @@ const MENU: MenuSeed[] = [
     displayOrder: 20,
     requiredPermission: 'figures.view',
     children: [
-      { slug: 'figures-nabi', labelId: 'Para Nabi', icon: 'BookOpen', path: '/figures?cat=nabi', displayOrder: 1 },
-      { slug: 'figures-sahabat', labelId: 'Sahabat', icon: 'User', path: '/figures?cat=sahabat&g=male', displayOrder: 2 },
-      { slug: 'figures-shahabiyat', labelId: 'Shahabiyat', icon: 'User', path: '/figures?cat=sahabat&g=female', displayOrder: 3 },
-      { slug: 'figures-tabiin', labelId: "Tabi'in", icon: 'User', path: '/figures?cat=tabiin&g=male', displayOrder: 4 },
-      { slug: 'figures-tabiiyat', labelId: "Tabi'iyyat", icon: 'User', path: '/figures?cat=tabiin&g=female', displayOrder: 5 },
-      { slug: 'figures-tabiut', labelId: "Tabi'ut Tabi'in", icon: 'User', path: '/figures?cat=tabiut_tabiin&g=male', displayOrder: 6 },
-      { slug: 'figures-tabiut-fem', labelId: "Tabi'at Tabi'iyyat", icon: 'User', path: '/figures?cat=tabiut_tabiin&g=female', displayOrder: 7 },
-      { slug: 'figures-shalih', labelId: 'Shalih & Shalihah', icon: 'BookHeart', path: '/figures?cat=shalih', displayOrder: 8 },
+      { slug: 'figures-nabi', labelId: 'Para Nabi', icon: 'BookOpen', path: '/figures?category=nabi', displayOrder: 1, isActive: false },
+      { slug: 'figures-sahabat', labelId: 'Sahabat', icon: 'User', path: '/figures?category=sahabat&gender=male', displayOrder: 2, isActive: false },
+      { slug: 'figures-shahabiyat', labelId: 'Shahabiyat', icon: 'User', path: '/figures?category=sahabat&gender=female', displayOrder: 3, isActive: false },
+      { slug: 'figures-tabiin', labelId: "Tabi'in", icon: 'User', path: '/figures?category=tabiin&gender=male', displayOrder: 4, isActive: false },
+      { slug: 'figures-tabiiyat', labelId: "Tabi'iyyat", icon: 'User', path: '/figures?category=tabiin&gender=female', displayOrder: 5, isActive: false },
+      { slug: 'figures-tabiut', labelId: "Tabi'ut Tabi'in", icon: 'User', path: '/figures?category=tabiut_tabiin&gender=male', displayOrder: 6, isActive: false },
+      { slug: 'figures-tabiut-fem', labelId: "Tabi'at Tabi'iyyat", icon: 'User', path: '/figures?category=tabiut_tabiin&gender=female', displayOrder: 7, isActive: false },
+      { slug: 'figures-shalih', labelId: 'Shalih & Shalihah', icon: 'BookHeart', path: '/figures?category=shalih_pasca_rasul', displayOrder: 8, isActive: false },
     ],
   },
   { slug: 'timeline', labelId: 'Timeline', icon: 'Clock', path: '/timeline', displayOrder: 30 },
