@@ -12,6 +12,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
 
+import { MobileNavProvider } from '@/components/organisms/mobile-nav-context'
 import { Navbar } from '@/components/organisms/navbar'
 import { Sidebar } from '@/components/organisms/sidebar'
 import { db } from '@athar/db'
@@ -44,12 +45,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   return (
-    <div className="grid min-h-screen grid-cols-[auto_1fr] bg-[rgb(var(--bg))] text-[rgb(var(--text))]">
-      <Sidebar />
-      <div className="flex min-w-0 flex-col">
-        <Navbar />
-        <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
+    <MobileNavProvider>
+      <div className="grid min-h-screen grid-cols-[auto_1fr] bg-[rgb(var(--bg))] text-[rgb(var(--text))]">
+        <Sidebar />
+        <div className="flex min-w-0 flex-col">
+          <Navbar />
+          <main className="flex-1 overflow-auto p-4 sm:p-6">{children}</main>
+        </div>
       </div>
-    </div>
+    </MobileNavProvider>
   )
 }

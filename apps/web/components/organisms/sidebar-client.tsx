@@ -23,6 +23,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import * as Lucide from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useMobileNav } from './mobile-nav-context'
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -564,10 +565,17 @@ export interface SidebarClientProps {
 
 export function SidebarClient({
   items,
-  mobileOpen = false,
+  mobileOpen,
   onMobileOpenChange,
 }: SidebarClientProps) {
   const pathname = usePathname() ?? '/'
+
+  // Context bridge — when the parent layout wraps in <MobileNavProvider>,
+  // we read mobile-open state from there. Explicit props still win so the
+  // legacy call sites (e.g. wired manually in a test) keep working.
+  const ctx = useMobileNav()
+  const effectiveOpen = mobileOpen ?? ctx.open
+  const effectiveSetOpen = onMobileOpenChange ?? ctx.setOpen
 
   // Start with `false` on both server and first client render to avoid a
   // hydration mismatch (localStorage isn't available during SSR). After
@@ -604,8 +612,8 @@ export function SidebarClient({
         onToggle={toggle}
       />
       <MobileDrawer
-        open={mobileOpen}
-        onOpenChange={onMobileOpenChange ?? (() => {})}
+        open={effectiveOpen}
+        onOpenChange={effectiveSetOpen}
         items={items}
         pathname={pathname}
       />

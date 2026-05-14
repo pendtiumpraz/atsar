@@ -24,6 +24,7 @@ import { QuotaIndicator } from './quota-indicator'
 import { NotificationBell } from './notification-bell'
 import { CalendarToggle } from './calendar-toggle'
 import { UserMenu } from './user-menu'
+import { useMobileNav } from './mobile-nav-context'
 
 // ─── Breadcrumb ──────────────────────────────────────────────────────────
 
@@ -124,6 +125,11 @@ export interface NavbarProps {
 export function Navbar({ onOpenMobileMenu }: NavbarProps) {
   const pathname = usePathname() ?? '/'
   const [scrolled, setScrolled] = React.useState(false)
+  // Fallback to the shared MobileNav context when the parent layout doesn't
+  // wire `onOpenMobileMenu` explicitly. This was the actual hamburger bug:
+  // both (admin) and (app) layouts mount <Navbar /> bare → click did nothing.
+  const mobileNav = useMobileNav()
+  const handleHamburger = onOpenMobileMenu ?? (() => mobileNav.setOpen(true))
 
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 4)
@@ -147,7 +153,7 @@ export function Navbar({ onOpenMobileMenu }: NavbarProps) {
         {/* Mobile hamburger */}
         <button
           type="button"
-          onClick={onOpenMobileMenu}
+          onClick={handleHamburger}
           aria-label="Buka menu"
           className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-md text-[rgb(var(--text))] hover:bg-[rgb(var(--bg-elevated))]"
         >

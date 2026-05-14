@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Toaster } from 'sonner'
 
 import { AntiFlashScript } from '@/components/theme/anti-flash-script'
@@ -15,6 +15,23 @@ export const metadata: Metadata = {
   description:
     'Aplikasi sirah para Nabi, Sahabat, dan ulama salaf — dengan timeline, peta interaktif, dan AI deep research bersumber salaf.',
   applicationName: 'Atsar',
+}
+
+// `viewport` was missing → Android Chrome / Safari iOS rendered the page at
+// its "natural" desktop width and let users pinch-zoom out, producing the
+// "tampilan aneh saat zoom out di mobile" report. Set device-width + 1x
+// initial scale; cap at 5x so accessibility users can still zoom in but
+// pinch-zoom-out collapsing the layout is disabled.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 5,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f172a' },
+  ],
 }
 
 export default function RootLayout({
