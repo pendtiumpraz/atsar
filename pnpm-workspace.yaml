@@ -13,4 +13,5 @@ allowBuilds:
   msgpackr-extract: false
   puppeteer: false
   sharp: true
+  simple-git-hooks: set this to true or false
   unrs-resolver: true
