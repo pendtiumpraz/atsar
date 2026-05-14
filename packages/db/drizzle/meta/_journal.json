@@ -15,6 +15,13 @@
       "when": 1778675667803,
       "tag": "0001_fancy_firedrake",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778720868046,
+      "tag": "0002_worried_boomer",
+      "breakpoints": true
     }
   ]
 }

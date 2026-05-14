@@ -255,6 +255,19 @@ export const calendarPreferenceEnum = pgEnum('calendar_preference_enum', ['h', '
 
 export const sourceLangEnum = pgEnum('source_lang_enum', ['ar', 'id', 'en'])
 
+export const researchJobTypeEnum = pgEnum('research_job_type_enum', [
+  'figure_ingest',
+  'battle_ingest',
+  'location_ingest',
+])
+
+export const researchJobStatusEnum = pgEnum('research_job_status_enum', [
+  'pending',
+  'running',
+  'completed',
+  'failed',
+])
+
 export const auditActionEnum = pgEnum('audit_action_enum', [
   'create',
   'update',
