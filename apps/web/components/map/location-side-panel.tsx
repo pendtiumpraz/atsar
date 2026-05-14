@@ -1,30 +1,31 @@
 // `<LocationSidePanel />` — right-hand pane on `/map`.
 //
 // Shown when the user clicks a location marker on the main map.  Lists the
-// top 5 figures linked to that location and links each one to its detail page.
+// figures linked to that location, grouped by their role (lahir / wafat /
+// dimakamkan / dakwah / hidup), each linking to its detail page.
+//
+// Data flow:
+//   The figures list is supplied by the parent page (`map/page.tsx`) via
+//   the `figures` prop — same payload as `/api/v1/figures/map-points`, just
+//   filtered down to the selected location.  No internal HTTP call, so the
+//   panel stays cheap and the parent retains a single source of truth.
 //
 // Behaviour:
 //   - When no `location` is selected, renders an empty-state placeholder.
-//   - When selected, fires a TanStack Query against `/figures?locationId=…`.
-//     The backend route doesn't currently honour `locationId` (the figures
-//     endpoint exposes only q / category / gender), so we treat any empty
-//     payload as "wiring pending" and surface a friendly "Segera hadir" copy
-//     instead of an alarming empty list.
+//   - When selected with figures, groups them by role and renders each as a
+//     link to `/figures/[slug]` with an avatar initial.
+//   - When selected with NO figures (e.g. an admin-added city not yet linked
+//     to a tokoh), renders a friendly "Belum ada tokoh terdaftar" copy.
 //   - On viewports < `lg`, the panel collapses into a bottom sheet via the
 //     `compact` prop, which the parent toggles based on viewport width.
-//
-// Selection is controlled by the parent: we only render data, we don't track
-// state.  This keeps the component testable in isolation and avoids two
-// sources of truth (URL search params vs. local state).
 
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import Link from 'next/link'
+import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { figuresApi, type Paginated } from '@/lib/api/endpoints'
 import { cn } from '@/lib/utils'
 
 export interface LocationSummary {
@@ -36,18 +37,23 @@ export interface LocationSummary {
   countryCode?: string | null
 }
 
-interface FigureLite {
-  id?: string
+/** Figure shape consumed by the side panel — subset of `FigureMapPointRow`. */
+export interface SidePanelFigure {
+  figureId: string
   slug: string
-  nameFullId?: string
-  nameShortId?: string
+  nameFullId: string
   nameFullAr?: string
-  categoryId?: string
+  nameShortId?: string | null
+  categorySlug?: string | null
+  /** Why this figure is plotted at the selected location. */
+  role: 'primary' | 'death' | 'burial' | 'figure_location'
 }
 
 export interface LocationSidePanelProps {
   /** Currently-selected location.  `null` renders the empty state. */
   location: LocationSummary | null
+  /** Figures linked to this location (parent filters from the map-points payload). */
+  figures?: SidePanelFigure[]
   /** Close button handler — clears the parent's selection. */
   onClose?: () => void
   /** Compact (bottom-sheet) styling for narrow viewports. */
@@ -69,25 +75,51 @@ function flagFromCountry(code?: string | null): string | undefined {
   return String.fromCodePoint(...[...trimmed].map((c) => c.charCodeAt(0) + base))
 }
 
+/** Human-readable Indonesian label per role. */
+const ROLE_LABELS: Record<SidePanelFigure['role'], string> = {
+  primary: 'Lahir / Tinggal',
+  death: 'Wafat',
+  burial: 'Dimakamkan',
+  figure_location: 'Terkait',
+}
+
+/** Display order — most narratively important first. */
+const ROLE_ORDER: SidePanelFigure['role'][] = [
+  'primary',
+  'death',
+  'burial',
+  'figure_location',
+]
+
+/** First letter (uppercase) of the figure's Indonesian name — avatar fallback. */
+function initialOf(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return '?'
+  return trimmed.charAt(0).toUpperCase()
+}
+
 export function LocationSidePanel({
   location,
+  figures = [],
   onClose,
   compact = false,
   className,
 }: LocationSidePanelProps) {
-  // The `/api/v1/figures` endpoint doesn't accept `locationId` yet (see
-  // `figure.schemas.ts` — schema only takes q/category/gender/page).  Until
-  // that lands we keep the query disabled and surface a "Segera hadir"
-  // placeholder.  The cache key is namespaced by location so the future
-  // wiring becomes a one-line change (flip this flag + add the filter).
-  const supportsLocationFilter: boolean = false
-  const query = useQuery<Paginated<FigureLite>>({
-    queryKey: ['map-figures-by-location', location?.id ?? null],
-    queryFn: () =>
-      figuresApi.list({ perPage: 5, page: 1 }) as Promise<Paginated<FigureLite>>,
-    enabled: !!location && supportsLocationFilter,
-    staleTime: 60_000,
-  })
+  // Group figures by role — `Map` preserves insertion order so we drive it
+  // off `ROLE_ORDER` to keep the rendering deterministic.
+  const grouped = useMemo(() => {
+    const buckets = new Map<SidePanelFigure['role'], SidePanelFigure[]>()
+    for (const role of ROLE_ORDER) buckets.set(role, [])
+    for (const f of figures) {
+      const arr = buckets.get(f.role)
+      if (arr) arr.push(f)
+    }
+    // Sort each bucket alphabetically for stable rendering.
+    for (const arr of buckets.values()) {
+      arr.sort((a, b) => a.nameFullId.localeCompare(b.nameFullId, 'id'))
+    }
+    return buckets
+  }, [figures])
 
   // Empty state — no location selected yet.
   if (!location) {
@@ -110,10 +142,7 @@ export function LocationSidePanel({
   }
 
   const flag = flagFromCountry(location.countryCode)
-  const figures = query.data?.rows ?? []
-  const total = query.data?.total ?? 0
-  const isLoading = supportsLocationFilter && (query.isPending || query.isFetching)
-  const isWiringPending = !supportsLocationFilter || (!isLoading && figures.length === 0)
+  const total = figures.length
 
   return (
     <aside
@@ -162,49 +191,56 @@ export function LocationSidePanel({
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">
-        {isLoading ? (
-          <PanelSkeleton />
-        ) : query.isError ? (
-          <div
-            role="alert"
-            className="rounded-md border border-[rgb(var(--danger))] bg-[rgb(var(--surface))] p-3 text-sm text-[rgb(var(--danger))]"
-          >
-            Gagal memuat tokoh terkait lokasi ini.
-          </div>
-        ) : isWiringPending ? (
+        {total === 0 ? (
           <div className="rounded-md border border-dashed border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))] p-4 text-center text-sm text-[rgb(var(--text-muted))]">
             <div className="mb-1 text-base text-[rgb(var(--text-faint))]" aria-hidden>
-              ⏳
+              👤
             </div>
-            Daftar tokoh per lokasi <strong>segera hadir</strong>.
+            Belum ada tokoh yang terdaftar di lokasi ini.
           </div>
         ) : (
           <>
             <p className="mb-3 text-sm text-[rgb(var(--text-muted))]">
               <strong className="text-[rgb(var(--text))]">{total}</strong> tokoh terkait
             </p>
-            <ul className="flex flex-col gap-2">
-              {figures.slice(0, 5).map((figure) => (
-                <li key={figure.id ?? figure.slug}>
-                  <Link
-                    href={`/figures/${figure.slug}`}
-                    className={cn(
-                      'flex items-center justify-between gap-2 rounded-md border border-transparent px-3 py-2 text-sm transition-colors',
-                      'hover:border-[rgb(var(--border))] hover:bg-[rgb(var(--bg-elevated))]',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))]',
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[rgb(var(--text))]">
-                      {figure.nameFullId ?? figure.nameShortId ?? figure.slug}
-                    </span>
-                    <ExternalLink
-                      className="h-3.5 w-3.5 shrink-0 text-[rgb(var(--text-faint))]"
-                      aria-hidden
-                    />
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-col gap-4">
+              {ROLE_ORDER.map((role) => {
+                const items = grouped.get(role) ?? []
+                if (items.length === 0) return null
+                return (
+                  <section key={role} aria-label={ROLE_LABELS[role]}>
+                    <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[rgb(var(--text-faint))]">
+                      {ROLE_LABELS[role]}{' '}
+                      <span className="font-normal">({items.length})</span>
+                    </h3>
+                    <ul className="flex flex-col gap-1">
+                      {items.map((figure) => (
+                        <li key={figure.figureId}>
+                          <Link
+                            href={`/figures/${figure.slug}`}
+                            className={cn(
+                              'flex items-center gap-3 rounded-md border border-transparent px-2 py-1.5 text-sm transition-colors',
+                              'hover:border-[rgb(var(--border))] hover:bg-[rgb(var(--bg-elevated))]',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--ring))]',
+                            )}
+                          >
+                            <span
+                              aria-hidden
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-xs font-semibold text-amber-700 dark:text-amber-300"
+                            >
+                              {initialOf(figure.nameShortId ?? figure.nameFullId)}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-[rgb(var(--text))]">
+                              {figure.nameShortId ?? figure.nameFullId}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
           </>
         )}
       </div>
@@ -217,19 +253,6 @@ export function LocationSidePanel({
         </Button>
       </footer>
     </aside>
-  )
-}
-
-function PanelSkeleton() {
-  return (
-    <div className="flex flex-col gap-2" aria-hidden>
-      {Array.from({ length: 4 }).map((_, idx) => (
-        <div
-          key={idx}
-          className="h-10 animate-pulse rounded-md border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))]"
-        />
-      ))}
-    </div>
   )
 }
 

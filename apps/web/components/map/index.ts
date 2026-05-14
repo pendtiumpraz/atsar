@@ -10,9 +10,13 @@ export { LayerControls, parseLayerState } from './layer-controls'
 export type { LayerState, CategoryLayerKey, LayerControlsProps } from './layer-controls'
 
 export { LocationSidePanel } from './location-side-panel'
-export type { LocationSidePanelProps, LocationSummary } from './location-side-panel'
+export type {
+  LocationSidePanelProps,
+  LocationSummary,
+  SidePanelFigure,
+} from './location-side-panel'
 
-export type { MapViewProps, MarkerCollection } from './map-view'
+export type { MapViewProps, MarkerCollection, FigureMarkerCollection } from './map-view'
 
 export { FigureMarker } from './figure-marker'
 export type { FigureMarkerProps } from './figure-marker'

@@ -28,16 +28,17 @@
 import dynamic from 'next/dynamic'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   LayerControls,
   LocationSidePanel,
   parseLayerState,
+  type FigureMarkerCollection,
   type LocationSummary,
   type MarkerCollection,
 } from '@/components/map'
-import { locationsApi } from '@/lib/api/endpoints'
+import { figuresApi, locationsApi } from '@/lib/api/endpoints'
 
 // MapLibre relies on `window`; skip the server pre-render for the canvas.
 const MapView = dynamic(
@@ -55,6 +56,56 @@ interface PublicLocationRow {
   countryCode: string | null
   region: string | null
   coordinates: { type: 'Point'; coordinates: [number, number] } | null
+}
+
+/** Shape returned by `/api/v1/figures/map-points` — see `figureService.listMapPoints`. */
+export interface FigureMapPointRow {
+  figureId: string
+  slug: string
+  nameFullId: string
+  nameFullAr: string
+  nameShortId: string | null
+  gender: 'male' | 'female'
+  categorySlug: string | null
+  locationId: string
+  locationSlug: string | null
+  locationName: string
+  longitude: number
+  latitude: number
+  role: 'primary' | 'death' | 'burial' | 'figure_location'
+}
+
+/** Convert figure-map-points to a GeoJSON FeatureCollection for the overlay. */
+function figureRowsToCollection(rows: FigureMapPointRow[]): FigureMarkerCollection {
+  return {
+    type: 'FeatureCollection',
+    features: rows
+      .filter(
+        (r) =>
+          Number.isFinite(r.longitude) &&
+          Number.isFinite(r.latitude) &&
+          // Defensive: drop rows whose coords didn't survive ST_X/ST_Y casts.
+          r.longitude >= -180 &&
+          r.longitude <= 180 &&
+          r.latitude >= -90 &&
+          r.latitude <= 90,
+      )
+      .map((r) => ({
+        type: 'Feature',
+        id: r.figureId,
+        geometry: { type: 'Point', coordinates: [r.longitude, r.latitude] },
+        properties: {
+          id: r.figureId,
+          slug: r.slug,
+          nameFullId: r.nameFullId,
+          nameFullAr: r.nameFullAr,
+          nameShortId: r.nameShortId,
+          role: r.role,
+          locationId: r.locationId,
+          locationName: r.locationName,
+        },
+      })),
+  }
 }
 
 /** Convert the API payload to a GeoJSON FeatureCollection consumable by MapLibre. */
@@ -137,9 +188,25 @@ export default function MapPage() {
     staleTime: 5 * 60_000,
   })
 
+  // Figure overlay — one feature per published tokoh, dropped at their
+  // resolved location.  The endpoint returns a plain array (no pagination).
+  const { data: figurePoints } = useQuery<FigureMapPointRow[]>({
+    queryKey: ['map', 'figure-points'],
+    queryFn: async () => {
+      const res = await figuresApi.mapPoints()
+      return Array.isArray(res) ? (res as FigureMapPointRow[]) : []
+    },
+    staleTime: 5 * 60_000,
+  })
+
   const collection = useMemo<MarkerCollection>(
     () => rowsToCollection(data ?? []),
     [data],
+  )
+
+  const figureCollection = useMemo(
+    () => figureRowsToCollection(figurePoints ?? []),
+    [figurePoints],
   )
 
   function handleMarkerClick(id: string) {
@@ -158,6 +225,50 @@ export default function MapPage() {
     })
   }
 
+  // Tokoh marker click — also select the figure's location so the side panel
+  // surfaces the "Tokoh terkait" list and the user has context for where the
+  // pin sits.  We do NOT auto-navigate to /figures/[slug] (let the user click
+  // the figure name in the side panel for that — keeps the map navigable).
+  const handleFigureClick = useCallback(
+    (figureId: string) => {
+      const fig = (figurePoints ?? []).find((p) => p.figureId === figureId)
+      if (!fig) return
+      const loc = (data ?? []).find((r) => r.id === fig.locationId)
+      if (loc) {
+        setSelected({
+          id: loc.id,
+          slug: loc.slug,
+          nameAr: loc.nameAr,
+          nameId: loc.nameId,
+          modernName: loc.modernName,
+          countryCode: loc.countryCode,
+        })
+        return
+      }
+      // Fall back to the figure's own location label if the location isn't in
+      // the active locations layer (e.g. category filter hid it).
+      setSelected({
+        id: fig.locationId,
+        slug: fig.locationSlug ?? fig.locationId,
+        nameAr: '',
+        nameId: fig.locationName,
+        modernName: null,
+        countryCode: null,
+      })
+    },
+    [figurePoints, data],
+  )
+
+  // Figures filtered down to whichever location is currently selected — fed
+  // into the side panel so it can render the "Tokoh terkait" list without a
+  // second HTTP round-trip.  Memoised against the raw point array so the
+  // panel doesn't churn on unrelated state changes.
+  const figuresAtSelected = useMemo(() => {
+    if (!selected) return []
+    return (figurePoints ?? []).filter((p) => p.locationId === selected.id)
+  }, [figurePoints, selected])
+
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -172,7 +283,7 @@ export default function MapPage() {
             ? 'Memuat lokasi…'
             : isError
               ? 'Gagal memuat lokasi.'
-              : `${collection.features.length} lokasi`}
+              : `${collection.features.length} lokasi · ${figureCollection.features.length} tokoh`}
         </p>
       </div>
 
@@ -188,8 +299,11 @@ export default function MapPage() {
         <div className="relative h-full min-h-[20rem] overflow-hidden rounded-lg border border-[rgb(var(--border))] bg-[rgb(var(--bg-elevated))]">
           <MapView
             markers={collection}
+            figureMarkers={figureCollection}
+            showFigures={layerState.showFigures}
             selectedId={selected?.id}
             onMarkerClick={handleMarkerClick}
+            onFigureClick={handleFigureClick}
             showHijrahRoute={layerState.hijrah}
             className="h-full w-full"
           />
@@ -210,6 +324,7 @@ export default function MapPage() {
               <div className="fixed inset-x-0 bottom-0 z-40 max-h-[60vh]">
                 <LocationSidePanel
                   location={selected}
+                  figures={figuresAtSelected}
                   onClose={() => setSelected(null)}
                   compact
                 />
@@ -219,6 +334,7 @@ export default function MapPage() {
         ) : (
           <LocationSidePanel
             location={selected}
+            figures={figuresAtSelected}
             onClose={() => setSelected(null)}
           />
         )}

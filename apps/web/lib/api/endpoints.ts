@@ -50,7 +50,18 @@ export interface FigureListParams {
 export const figuresApi = {
   list: (params: FigureListParams = {}) =>
     apiPaginated<any>(`/figures${buildQuery(params)}`),
+  /** Map overlay — one point per published figure with a resolved location. */
+  mapPoints: () => api.get<any[]>('/figures/map-points'),
   getBySlug: (slug: string) => api.get<any>(`/figures/${encodeURIComponent(slug)}`),
+  /**
+   * Ancestral lineage chain ("nasab") — upward from the figure through
+   * father/mother edges. Walks up to 25 generations. See
+   * `app/api/v1/figures/[slug]/nasab/route.ts` for the SQL.
+   */
+  nasab: (slug: string) =>
+    api.get<{ self: any; ancestors: any[] }>(
+      `/figures/${encodeURIComponent(slug)}/nasab`,
+    ),
   create: (body: Record<string, unknown>, init?: ApiRequestInit) =>
     api.post<any>('/figures', body, init),
   update: (slug: string, body: Record<string, unknown>) =>
@@ -61,6 +72,22 @@ export const figuresApi = {
       apiPaginated<any>(`/trash/figures${buildQuery(params)}`),
     restore: (id: string) => api.post<{ id: string }>(`/trash/figures/${id}/restore`),
     hardDelete: (id: string) => api.delete<{ id: string }>(`/trash/figures/${id}/hard`),
+  },
+  /**
+   * Relation checker — pick two slugs, get the relationship explained in
+   * Indonesian prose plus a path breadcrumb. See
+   * `app/api/v1/figures/relation/route.ts` for the resolution strategy.
+   */
+  relation: {
+    check: (from: string, to: string, refresh = false) =>
+      api.get<any>(
+        `/figures/relation${buildQuery({ from, to, refresh: refresh ? '1' : '' })}`,
+      ),
+    bulk: (fromSlug: string, toSlugs: string[]) =>
+      api.post<{ from: string; results: Array<{ slug: string; relation: any; error: any }> }>(
+        '/figures/relation/bulk',
+        { fromSlug, toSlugs },
+      ),
   },
 }
 

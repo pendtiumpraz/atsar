@@ -14,7 +14,7 @@
 
 'use client'
 
-import { Route } from 'lucide-react'
+import { Route, Users } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useMemo } from 'react'
 
@@ -43,6 +43,8 @@ export interface LayerState {
   categories: ReadonlySet<CategoryLayerKey>
   gender: '' | 'male' | 'female'
   hijrah: boolean
+  /** Show the tokoh (figure) overlay.  Default: true.  `?tokoh=0` hides it. */
+  showFigures: boolean
 }
 
 /**
@@ -61,7 +63,9 @@ export function parseLayerState(params: URLSearchParams): LayerState {
   const gender =
     genderRaw === 'male' || genderRaw === 'female' ? genderRaw : ''
   const hijrah = params.get('hijrah') === '1'
-  return { categories, gender, hijrah }
+  // Default ON — only `?tokoh=0` hides the overlay so deep links stay stable.
+  const showFigures = params.get('tokoh') !== '0'
+  return { categories, gender, hijrah, showFigures }
 }
 
 export interface LayerControlsProps {
@@ -121,6 +125,15 @@ export function LayerControls({ className }: LayerControlsProps) {
       else p.set('hijrah', '1')
     })
   }, [pushParams, state.hijrah])
+
+  // Toggle figure overlay — default is ON, so we set `?tokoh=0` to hide and
+  // clear the param to re-enable (keeps the URL minimal for the common case).
+  const toggleFigures = useCallback(() => {
+    pushParams((p) => {
+      if (state.showFigures) p.set('tokoh', '0')
+      else p.delete('tokoh')
+    })
+  }, [pushParams, state.showFigures])
 
   const tokohActive = state.categories.size === 0
 
@@ -202,7 +215,22 @@ export function LayerControls({ className }: LayerControlsProps) {
         </select>
       </label>
 
-      <div className="ml-auto flex items-center">
+      <div className="ml-auto flex items-center gap-2">
+        <Button
+          type="button"
+          variant={state.showFigures ? 'primary' : 'outline'}
+          size="sm"
+          onClick={toggleFigures}
+          aria-pressed={state.showFigures}
+          aria-label={
+            state.showFigures
+              ? 'Sembunyikan tokoh di peta'
+              : 'Tampilkan tokoh di peta'
+          }
+        >
+          <Users className="h-3.5 w-3.5" aria-hidden />
+          <span>Tampilkan Tokoh</span>
+        </Button>
         <Button
           type="button"
           variant={state.hijrah ? 'primary' : 'outline'}

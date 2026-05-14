@@ -67,10 +67,37 @@ export type MarkerCollection = GeoJSON.FeatureCollection<
   }
 >
 
+/**
+ * Feature collection of FIGURE markers — the second overlay on `/map`.
+ * One feature per published tokoh, dropped at their resolved location.
+ * `id` is the figure id (NOT the location id), so the figure layer never
+ * collides with the location layer on click dispatch.
+ */
+export type FigureMarkerCollection = GeoJSON.FeatureCollection<
+  GeoJSON.Point,
+  {
+    id: string
+    slug: string
+    nameFullId: string
+    nameFullAr?: string
+    nameShortId?: string | null
+    role?: string
+    /** Originating location id — used by the side panel to filter related figures. */
+    locationId?: string
+    locationName?: string
+  }
+>
+
 export interface MapViewProps {
   markers: MarkerCollection
+  /** Optional figure overlay — rendered as a distinct amber cluster layer. */
+  figureMarkers?: FigureMarkerCollection
+  /** When false, the figure layer is hidden (toggled by `<LayerControls />`). */
+  showFigures?: boolean
   selectedId?: string
   onMarkerClick?: (id: string) => void
+  /** Tokoh marker click — receives the figure id (NOT a location id). */
+  onFigureClick?: (figureId: string) => void
   /** Mekkah default — [lng, lat]. */
   initialCenter?: [number, number]
   initialZoom?: number
@@ -130,8 +157,11 @@ function readDocTheme(): ResolvedTheme {
 
 export function MapView({
   markers,
+  figureMarkers,
+  showFigures = true,
   selectedId,
   onMarkerClick,
+  onFigureClick,
   initialCenter = MECCA,
   initialZoom = 4,
   showHijrahRoute = false,
@@ -186,9 +216,20 @@ export function MapView({
     [selectedId],
   )
 
-  // Click handler.  Two cases:
-  //   1. Tap on a cluster → zoom in to its expansion level.
-  //   2. Tap on an individual point → bubble up via `onMarkerClick`.
+  // Empty collection sentinel — keeps the figure `<Source>` stable when the
+  // caller hasn't supplied any data yet (otherwise MapLibre would tear down
+  // and recreate the source on every render).
+  const emptyFigures = useMemo<FigureMarkerCollection>(
+    () => ({ type: 'FeatureCollection', features: [] }),
+    [],
+  )
+  const figureCollection = figureMarkers ?? emptyFigures
+
+  // Click handler.  Three cases, in order:
+  //   1. Tap on a cluster → zoom in to its expansion level.  The cluster
+  //      source id depends on which layer was hit (locations vs. figures).
+  //   2. Tap on a figure point → bubble up via `onFigureClick`.
+  //   3. Tap on a location point → bubble up via `onMarkerClick`.
   const onClick = useCallback(
     (event: MapLayerMouseEvent) => {
       const feature = event.features?.[0]
@@ -196,11 +237,19 @@ export function MapView({
       const map = mapRef.current?.getMap()
       if (!map) return
 
+      const layerId = feature.layer?.id
+
       // Cluster: zoom to the cluster's expansion.  In maplibre-gl v5 the API
       // is Promise-based, so we await the resolved zoom before easing.
       if (feature.properties?.cluster) {
         const clusterId = feature.properties.cluster_id as number
-        const src = map.getSource('locations') as GeoJSONSource | undefined
+        // Figure clusters share the `figures` source; everything else
+        // belongs to `locations`.
+        const sourceId =
+          layerId === 'figure-clusters' || layerId === 'figure-cluster-count'
+            ? 'figures'
+            : 'locations'
+        const src = map.getSource(sourceId) as GeoJSONSource | undefined
         if (!src) return
         void src
           .getClusterExpansionZoom(clusterId)
@@ -217,9 +266,15 @@ export function MapView({
       }
 
       const id = feature.properties?.id as string | undefined
-      if (id && onMarkerClick) onMarkerClick(id)
+      if (!id) return
+
+      if (layerId === 'figures-unclustered') {
+        if (onFigureClick) onFigureClick(id)
+        return
+      }
+      if (onMarkerClick) onMarkerClick(id)
     },
-    [onMarkerClick],
+    [onMarkerClick, onFigureClick],
   )
 
   // Cursor feedback — pointer over interactive layers.
@@ -244,7 +299,13 @@ export function MapView({
         mapStyle={mapStyle}
         // Interactive layers — the click handler only fires when one of these
         // is hit, so MapLibre filters out clicks on the basemap automatically.
-        interactiveLayerIds={['clusters', 'unclustered']}
+        // Figure layers are listed only when the overlay is enabled to avoid
+        // ghost clicks on a hidden layer.
+        interactiveLayerIds={
+          showFigures
+            ? ['clusters', 'unclustered', 'figure-clusters', 'figures-unclustered']
+            : ['clusters', 'unclustered']
+        }
         onClick={onClick}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
@@ -344,6 +405,86 @@ export function MapView({
             }
           />
         </Source>
+
+        {/* Figure overlay — distinct amber palette so tokoh markers stand
+            apart from the emerald city markers.  Same cluster machinery as
+            the locations source; the click handler routes figure taps to
+            `onFigureClick` instead of `onMarkerClick`. */}
+        {showFigures ? (
+          <Source
+            id="figures"
+            type="geojson"
+            data={figureCollection}
+            cluster
+            clusterMaxZoom={14}
+            clusterRadius={40}
+            promoteId="id"
+          >
+            <Layer
+              id="figure-clusters"
+              type="circle"
+              filter={['has', 'point_count'] as FilterSpecification}
+              paint={
+                {
+                  'circle-color': [
+                    'step',
+                    ['get', 'point_count'],
+                    '#f59e0b', // amber-500
+                    10,
+                    '#d97706', // amber-600
+                    50,
+                    '#b45309', // amber-700
+                    200,
+                    '#78350f', // amber-900
+                  ] as unknown as ExpressionSpecification,
+                  'circle-radius': [
+                    'step',
+                    ['get', 'point_count'],
+                    14,
+                    10,
+                    18,
+                    50,
+                    24,
+                    200,
+                    30,
+                  ] as unknown as ExpressionSpecification,
+                  'circle-stroke-width': 2,
+                  'circle-stroke-color': 'rgba(255,255,255,0.85)',
+                } satisfies CircleLayerSpecification['paint']
+              }
+            />
+            <Layer
+              id="figure-cluster-count"
+              type="symbol"
+              filter={['has', 'point_count'] as FilterSpecification}
+              layout={
+                {
+                  'text-field': ['get', 'point_count_abbreviated'] as unknown as ExpressionSpecification,
+                  'text-size': 11,
+                  'text-allow-overlap': true,
+                } satisfies SymbolLayerSpecification['layout']
+              }
+              paint={
+                {
+                  'text-color': '#ffffff',
+                } satisfies SymbolLayerSpecification['paint']
+              }
+            />
+            <Layer
+              id="figures-unclustered"
+              type="circle"
+              filter={['!', ['has', 'point_count']] as FilterSpecification}
+              paint={
+                {
+                  'circle-color': '#f59e0b', // amber-500
+                  'circle-radius': 5,
+                  'circle-stroke-width': 2,
+                  'circle-stroke-color': '#ffffff',
+                } satisfies CircleLayerSpecification['paint']
+              }
+            />
+          </Source>
+        ) : null}
 
         {/* Hijrah route overlay — separate source so it can be toggled. */}
         {showHijrahRoute ? (

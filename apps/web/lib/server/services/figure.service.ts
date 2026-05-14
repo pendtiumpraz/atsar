@@ -19,6 +19,7 @@ import {
 } from '@athar/db/schema'
 import { ApiError } from '@/lib/server/api'
 import { auditLog } from '@/lib/server/services/audit.service'
+import { filterAllowedFigureIds } from '@/lib/server/services/content-access.service'
 import type {
   CreateFigureInput,
   ListFiguresQuery,
@@ -668,6 +669,190 @@ export async function listTrash(input: ListTrashQuery): Promise<PaginatedFigures
   }
 }
 
+// ── Map points (figure overlay on /map) ───────────────────────────────
+//
+// One row per PUBLISHED figure that resolves to at least one location.
+// "Resolved" follows a preference cascade so every tokoh appears even if
+// only the death/burial side is filled in:
+//   1. `figures.primaryLocationId`
+//   2. `figures.deathLocationId`
+//   3. `figures.burialLocationId`
+//   4. First `figure_locations` row (any role) with a non-null `locationId`.
+//
+// COALESCE handles the first three FK columns inline.  The 4th fallback
+// is layered as a UNION-style second pass — figures with none of the
+// direct FKs but at least one `figure_locations` row.  PostGIS
+// `ST_X` / `ST_Y` on the geography-cast geometry extracts lng/lat.
+//
+// Content scope is applied AFTER the DB pass via `filterAllowedFigureIds`
+// (same pattern as the AI chat tool) so anonymous/free-tier callers only
+// see figures their plan covers.  Staff (admin/reviewer) bypass.
+
+export type FigureLocationRole = (typeof figureLocations.$inferSelect)['role']
+
+export interface FigureMapPoint {
+  figureId: string
+  slug: string
+  nameFullId: string
+  nameFullAr: string
+  nameShortId: string | null
+  gender: 'male' | 'female'
+  categorySlug: string | null
+  locationId: string
+  locationSlug: string | null
+  locationName: string
+  longitude: number
+  latitude: number
+  /** Which preference-tier the location was resolved from. */
+  role: 'primary' | 'death' | 'burial' | 'figure_location'
+}
+
+export async function listMapPoints(
+  userId: string | null,
+): Promise<FigureMapPoint[]> {
+  // Pass 1 — figures whose `primary | death | burial` FK resolves to a
+  // location with coordinates.  COALESCE picks the first non-null FK and
+  // we LEFT JOIN locations once on the resolved id.
+  const resolvedId = sql<string>`COALESCE(${figures.primaryLocationId}, ${figures.deathLocationId}, ${figures.burialLocationId})`
+
+  const directRows = await db
+    .select({
+      figureId: figures.id,
+      slug: figures.slug,
+      nameFullId: figures.nameFullId,
+      nameFullAr: figures.nameFullAr,
+      nameShortId: figures.nameShortId,
+      gender: figures.gender,
+      categorySlug: figureCategories.slug,
+      // Resolved FK ids for role classification.
+      primaryLocationId: figures.primaryLocationId,
+      deathLocationId: figures.deathLocationId,
+      burialLocationId: figures.burialLocationId,
+      locationId: locations.id,
+      locationSlug: locations.slug,
+      locationNameId: locations.nameId,
+      // PostGIS extraction — cast the geography to geometry first so ST_X/ST_Y
+      // accept it without a srid mismatch.
+      longitude: sql<number>`ST_X(${locations.coordinates}::geometry)`,
+      latitude: sql<number>`ST_Y(${locations.coordinates}::geometry)`,
+    })
+    .from(figures)
+    .leftJoin(locations, eq(locations.id, resolvedId))
+    .leftJoin(figureCategories, eq(figureCategories.id, figures.categoryId))
+    .where(
+      and(
+        isNull(figures.deletedAt),
+        isNull(figureCategories.deletedAt),
+        isNull(locations.deletedAt),
+        isNotNull(locations.coordinates),
+        sql`${figures.status} = 'published'`,
+      ),
+    )
+
+  // Pass 2 — figures with NO direct FK but at least one figure_locations
+  // row.  We pick the earliest row (by created_at ascending) as the
+  // canonical "first row" per the brief's fallback order.
+  const fallbackRows = await db
+    .select({
+      figureId: figures.id,
+      slug: figures.slug,
+      nameFullId: figures.nameFullId,
+      nameFullAr: figures.nameFullAr,
+      nameShortId: figures.nameShortId,
+      gender: figures.gender,
+      categorySlug: figureCategories.slug,
+      figureLocationCreatedAt: figureLocations.createdAt,
+      locationId: locations.id,
+      locationSlug: locations.slug,
+      locationNameId: locations.nameId,
+      longitude: sql<number>`ST_X(${locations.coordinates}::geometry)`,
+      latitude: sql<number>`ST_Y(${locations.coordinates}::geometry)`,
+    })
+    .from(figures)
+    .innerJoin(figureLocations, eq(figureLocations.figureId, figures.id))
+    .innerJoin(locations, eq(locations.id, figureLocations.locationId))
+    .leftJoin(figureCategories, eq(figureCategories.id, figures.categoryId))
+    .where(
+      and(
+        isNull(figures.deletedAt),
+        isNull(figureLocations.deletedAt),
+        isNull(locations.deletedAt),
+        isNull(figureCategories.deletedAt),
+        isNotNull(locations.coordinates),
+        sql`${figures.status} = 'published'`,
+        isNull(figures.primaryLocationId),
+        isNull(figures.deathLocationId),
+        isNull(figures.burialLocationId),
+      ),
+    )
+    .orderBy(asc(figureLocations.createdAt))
+
+  // Build a map<figureId, point> — direct rows win, fallback fills the gaps.
+  const byId = new Map<string, FigureMapPoint>()
+
+  for (const r of directRows) {
+    if (!r.locationId || r.longitude == null || r.latitude == null) continue
+    // Classify which FK actually resolved.  We rely on the same preference
+    // order as the COALESCE so the role label matches reality.
+    let role: FigureMapPoint['role']
+    if (r.primaryLocationId === r.locationId) role = 'primary'
+    else if (r.deathLocationId === r.locationId) role = 'death'
+    else if (r.burialLocationId === r.locationId) role = 'burial'
+    else role = 'primary' // defensive — shouldn't happen given the COALESCE
+
+    byId.set(r.figureId, {
+      figureId: r.figureId,
+      slug: r.slug,
+      nameFullId: r.nameFullId,
+      nameFullAr: r.nameFullAr,
+      nameShortId: r.nameShortId,
+      gender: r.gender,
+      categorySlug: r.categorySlug ?? null,
+      locationId: r.locationId,
+      locationSlug: r.locationSlug ?? null,
+      // `leftJoin` makes nameId nullable in TS even though the WHERE clause
+      // filters out locations without coordinates (which implies the row exists).
+      locationName: r.locationNameId ?? '',
+      longitude: Number(r.longitude),
+      latitude: Number(r.latitude),
+      role,
+    })
+  }
+
+  for (const r of fallbackRows) {
+    if (byId.has(r.figureId)) continue // direct FK already covered
+    if (!r.locationId || r.longitude == null || r.latitude == null) continue
+    byId.set(r.figureId, {
+      figureId: r.figureId,
+      slug: r.slug,
+      nameFullId: r.nameFullId,
+      nameFullAr: r.nameFullAr,
+      nameShortId: r.nameShortId,
+      gender: r.gender,
+      categorySlug: r.categorySlug ?? null,
+      locationId: r.locationId,
+      locationSlug: r.locationSlug ?? null,
+      locationName: r.locationNameId,
+      longitude: Number(r.longitude),
+      latitude: Number(r.latitude),
+      role: 'figure_location',
+    })
+  }
+
+  const allPoints = Array.from(byId.values())
+  if (allPoints.length === 0) return []
+
+  // Content scope — staff bypass returns the full id list.  Anonymous /
+  // free callers get only the figures their tier covers (nabi +
+  // shalih_pre_rasul + curated allow-list).
+  const allowedIds = await filterAllowedFigureIds(
+    userId,
+    allPoints.map((p) => p.figureId),
+  )
+  const allowed = new Set(allowedIds)
+  return allPoints.filter((p) => allowed.has(p.figureId))
+}
+
 // ── Default export (namespaced) ───────────────────────────────────────
 export const figureService = {
   list,
@@ -678,4 +863,5 @@ export const figureService = {
   restore,
   hardDelete,
   listTrash,
+  listMapPoints,
 }
