@@ -51,20 +51,55 @@ const responseSchema = z.object({
     .describe('Anak judul singkat, max 1 kalimat, opsional.'),
 })
 
-const TITLE_SYSTEM_PROMPT = `Kamu adalah editor naskah buku Sirah berbahasa Indonesia. Tugasmu
-membuat judul buku yang ELEGAN dan PANTAS dipajang di toko buku Islam:
-- Hindari kata seperti "Kumpulan", "Daftar", "List", atau judul yang
-  terdengar seperti laporan internal.
-- Gunakan diksi yang menggugah: "Jejak", "Cahaya", "Lentera",
-  "Mutiara", "Tinta", "Telaga", "Bintang", "Lentera Salaf", dsb —
-  tapi jangan pakai kata yang sama di setiap judul, variasikan.
-- Pakai gelar yang benar: Nabi ﷺ, RA untuk Sahabat, rahimahullah
-  untuk Tabi'in & Ulama Salaf. Untuk shahabiyat pakai 'Radhiyallahu
-  'anhā'.
-- Judul Arab harus terbaca natural oleh penutur Arab. Jangan
-  transliterasi judul Indonesia ke huruf Arab.
-- Subtitle opsional — hanya kalau menambah info nyata.
-- JANGAN cantumkan nama penerbit, harga, atau tahun.`
+const TITLE_SYSTEM_PROMPT = `Kamu adalah editor naskah buku Sirah berbahasa Indonesia, dengan
+selera bahasa sastra yang halus. Tugasmu membaca ringkasan tokoh-tokoh
+yang akan dimuat dalam SATU buku, lalu menyarikan **benang merah** di
+antara mereka menjadi sebuah judul yang ELEGAN, PUITIS, dan layak
+dipajang di toko buku Islam premium.
+
+PROSES MENYUSUN JUDUL (wajib dilakukan secara internal sebelum
+memutuskan):
+  1. Baca SETIAP ringkasan tokoh dengan teliti.
+  2. Identifikasi tema yang menyatukan: keilmuan, jihad, keteguhan,
+     keadilan, dakwah, generasi tertentu, geografi, peran sosial,
+     pengabdian khusus, dll.
+  3. Pilih kiasan/diksi yang menggambarkan tema tersebut — bukan
+     "Kumpulan", "Daftar", "List", atau frasa generik.
+  4. Pastikan judul Indonesia dan Arab membawa NUANSA yang sama
+     (bukan terjemahan harfiah, tapi resonansi yang setara).
+
+LARANGAN KERAS:
+  - JANGAN gunakan format "Kumpulan Sirah — N Tokoh" atau variasinya.
+  - JANGAN sekadar menggabungkan nama-nama tokoh.
+  - JANGAN pakai kata "buku" atau "kitab" di dalam judul (judul
+    BUKAN sub-judul).
+  - JANGAN cantumkan nama penerbit, harga, atau tahun.
+
+DIKSI YANG DIANJURKAN (pilih 1, variasikan tiap permintaan, jangan
+selalu pakai kata yang sama):
+  Cahaya, Bintang, Mutiara, Telaga, Tinta, Lentera, Jejak, Lentera,
+  Embun, Pelita, Mata Air, Permata, Suluh, Untaian, Sebaran, Lintasan,
+  Pilar, Tilas, Lautan, Mahkota, Wangi, Suara, Sayap.
+
+GELAR (wajib akurat):
+  - Nabi ﷺ atau "shallallahu 'alaihi wa sallam".
+  - Sahabat → "RA" atau "رضي الله عنه/عنها".
+  - Tabi'in / Ulama Salaf → "rahimahullah" atau "رحمه الله".
+
+JUDUL ARAB:
+  - Harus natural — pakai diksi Arab sastra (lentera = مصباح/سراج,
+    cahaya = نور, mutiara = درّة, jejak = أَثَر, telaga = حوض/كوثر,
+    untaian = عقد, suluh = قبس).
+  - JANGAN transliterasi judul Indonesia ke huruf Arab.
+
+SUBTITLE: opsional, hanya kalau menambah info nyata (mis. "Tujuh
+Fuqaha Madinah"). Maks 1 kalimat singkat.
+
+CONTOH HASIL YANG BAIK:
+  - "Lentera Tujuh Fuqaha Madinah" / "مصابيح الفقهاء السبعة بالمدينة"
+  - "Mata Air Sunnah: Para Imam Hadits dari Khurasan" /
+    "ينابيع السنة: أئمة الحديث من خراسان"
+  - "Mahkota Generasi Sahabat" / "تاج جيل الصحابة"`
 
 export const POST = withErrorHandling(async (req) => {
   const { userId } = await requireAuth(req)
@@ -112,11 +147,32 @@ export const POST = withErrorHandling(async (req) => {
     })
     .join('\n')
 
+  // Salt the prompt with a small per-request hint so a re-roll on the
+  // same figures actually produces a different title (otherwise low
+  // temperature + identical input → identical output).
+  const salts = [
+    'condongkan ke nuansa keilmuan',
+    'condongkan ke nuansa keteguhan iman',
+    'condongkan ke nuansa pengabdian dan jihad',
+    'condongkan ke nuansa kelembutan akhlak',
+    'condongkan ke nuansa warisan ilmu yang tersambung',
+    'condongkan ke nuansa geografi/perjalanan',
+    'condongkan ke nuansa zuhud dan ibadah',
+  ]
+  const salt = salts[Math.floor(Math.random() * salts.length)] ?? salts[0]
+
   const userPrompt = `Tokoh dalam buku (${rows.length}):
 ${figuresBlock}
-${parsed.data.styleHint ? `\nGaya yang diinginkan: ${parsed.data.styleHint}` : ''}
+${parsed.data.styleHint ? `\nGaya yang diinginkan user: ${parsed.data.styleHint}` : ''}
 
-Hasilkan satu judul yang menonjolkan ${rows.length === 1 ? 'sosok tunggal ini' : 'tema yang menyatukan tokoh-tokoh ini'}. Jangan generik.`
+ARAHAN UNTUK SESI INI: ${salt}.
+
+LAKUKAN SEKARANG (internal, jangan tampilkan di output):
+  1. Sarikan benang merah dari ${rows.length === 1 ? 'sosok ini' : `${rows.length} tokoh ini`} berdasarkan ringkasan di atas.
+  2. Pilih satu diksi yang paling cocok untuk tema itu.
+  3. Rangkai judul ID + AR + (opsional) subtitle.
+
+Hasilkan output JSON sesuai schema. Jangan menjawab dalam prosa.`
 
   const active = await getActiveModel('agent').catch((err: unknown) => {
     const message = err instanceof Error ? err.message : 'Model agent tidak tersedia'
@@ -130,7 +186,12 @@ Hasilkan satu judul yang menonjolkan ${rows.length === 1 ? 'sosok tunggal ini' :
     system: TITLE_SYSTEM_PROMPT,
     prompt: userPrompt,
     schema: responseSchema,
-    temperature: 0.7,
+    // Higher temperature than the chat route — title-making is a creative
+    // synthesis task, not a factual recall task. We want different diction
+    // every reroll, so the user can keep clicking "Generate dari AI" until
+    // they find one they like.
+    temperature: 0.95,
+    topP: 0.95,
     maxTokens: 400,
     maxRetries: 1,
   })
