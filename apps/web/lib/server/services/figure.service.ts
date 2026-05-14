@@ -13,6 +13,7 @@ import {
   figures,
   figureCategories,
   figureLocations,
+  figureRelationPaths,
   figureRelations,
   locations,
   whitelistDomains,
@@ -562,6 +563,11 @@ export async function softDelete(slug: string, actorId: string): Promise<void> {
   // Cascade atomically via Neon's HTTP batch (single round-trip, single
   // implicit transaction).  Neon-http intentionally does not expose a full
   // `db.transaction` — use `db.batch([...])` instead.
+  //
+  // Also invalidate every `figure_relation_paths` cache row touching this
+  // figure (either direction) so the next /api/v1/figures/relation lookup
+  // re-computes from scratch instead of returning a stale entry that may
+  // reference soft-deleted data.
   await db.batch([
     db
       .update(figures)
@@ -575,6 +581,18 @@ export async function softDelete(slug: string, actorId: string): Promise<void> {
       .update(figureLocations)
       .set({ deletedAt: now, deletedBy: actorId })
       .where(and(eq(figureLocations.figureId, row.id), isNull(figureLocations.deletedAt))),
+    db
+      .update(figureRelationPaths)
+      .set({ deletedAt: now, deletedBy: actorId })
+      .where(
+        and(
+          or(
+            eq(figureRelationPaths.fromFigureId, row.id),
+            eq(figureRelationPaths.toFigureId, row.id),
+          ),
+          isNull(figureRelationPaths.deletedAt),
+        ),
+      ),
   ])
 
   await auditLog.write({

@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   timestamp,
   boolean,
+  jsonb,
 } from 'drizzle-orm/pg-core'
 import { baseColumns } from './_common.js'
 import {
@@ -146,6 +147,79 @@ export const figureRelations = pgTable(
       .where(sql`${t.deletedAt} IS NULL`),
     index('figure_relations_figure_idx').on(t.figureId),
     index('figure_relations_related_idx').on(t.relatedId),
+  ],
+)
+
+// ─── figure_relation_paths ──────────────────────────────────────────
+// Cached "relation checker" results. Each row records the resolved
+// relationship between a directed pair of figures (from → to), along with
+// the human-readable Indonesian/Arabic explanation, the ordered path of
+// edges that produced it, and where the answer came from (DB graph walk,
+// AI + websearch, or an explicit "no relation found").
+//
+// Invalidation contract:
+//   - When admin edits a `figure_relations` row touching either party,
+//     all rows in this table referencing that figure should be soft-deleted
+//     (`deleted_at = now()`) so the next lookup re-computes from scratch.
+//   - Otherwise we honour a 30-day TTL at the API layer — anything older
+//     than that is treated as stale and re-resolved.
+//
+// `path_json` shape: `RelationPathStep[]` — each step is one hop in the
+// resolved chain. For AI-fallback rows the path is best-effort (often empty).
+
+export interface RelationPathStep {
+  /** Figure UUID for this hop. Null when the AI fallback couldn't resolve a real figure. */
+  figureId: string | null
+  /** Stable slug for linking — null when figureId is null. */
+  slug: string | null
+  /** Display name shown in the breadcrumb. */
+  name: string
+  /** Relation type slug (`father`, `companion`, `teacher_of`, …) used to reach this hop. Empty on the seed step. */
+  edgeType: string
+  /** Human label rendered between hops, e.g. "anak dari", "guru dari". */
+  edgeLabel: string
+}
+
+export const figureRelationPaths = pgTable(
+  'figure_relation_paths',
+  {
+    ...baseColumns,
+    fromFigureId: uuid('from_figure_id')
+      .notNull()
+      .references(() => figures.id, { onDelete: 'cascade' }),
+    toFigureId: uuid('to_figure_id')
+      .notNull()
+      .references(() => figures.id, { onDelete: 'cascade' }),
+    /**
+     * - `db_graph`     — pure graph traversal succeeded.
+     * - `ai_websearch` — AI fallback used the salafi whitelist to extract a relationship.
+     * - `none`         — explicitly "no relationship found" (cached so we don't keep asking AI).
+     */
+    resolutionSource: text('resolution_source', {
+      enum: ['db_graph', 'ai_websearch', 'none'],
+    }).notNull(),
+    /** Indonesian prose: "X adalah anak dari paman Y". Required. */
+    descriptionId: text('description_id').notNull(),
+    /** Arabic prose (optional, AI may provide). */
+    descriptionAr: text('description_ar'),
+    /** Ordered chain of hops. Empty for AI fallback when no path could be reconstructed. */
+    pathJson: jsonb('path_json').notNull().$type<RelationPathStep[]>(),
+    /** Whitelist source URL when `resolutionSource = 'ai_websearch'`. */
+    citationUrl: text('citation_url'),
+    citationDomain: text('citation_domain'),
+    confidence: text('confidence', {
+      enum: ['high', 'medium', 'low'],
+    })
+      .notNull()
+      .default('medium'),
+  },
+  (t) => [
+    // One canonical row per directed pair (active rows only).
+    uniqueIndex('rel_paths_from_to_idx')
+      .on(t.fromFigureId, t.toFigureId)
+      .where(sql`${t.deletedAt} IS NULL`),
+    index('rel_paths_from_idx').on(t.fromFigureId),
+    index('rel_paths_to_idx').on(t.toFigureId),
   ],
 )
 
