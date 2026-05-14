@@ -674,7 +674,10 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
                     <span className="font-medium">
                       {status === 'pending' && 'Antri…'}
                       {status === 'running' && 'AI sedang crawl…'}
-                      {status === 'completed' && 'Selesai. Diff siap ditinjau.'}
+                      {status === 'completed' &&
+                        (job.suggestions && Object.keys(job.suggestions).length > 0
+                          ? 'Selesai. Diff siap ditinjau.'
+                          : 'Selesai. Tidak ada perubahan dari AI.')}
                       {status === 'failed' && (job.errorMessage ?? 'Gagal')}
                     </span>
                   </div>

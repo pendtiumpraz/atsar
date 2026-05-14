@@ -14,7 +14,7 @@
 
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
@@ -205,17 +205,23 @@ function ActiveJobRow({ job, pollEnabled, onTerminal }: ActiveJobRowProps) {
     return { ...job, ...(detail ?? {}) } as IngestJobRow & Partial<JobDetail>
   }, [job, detail])
 
-  // Surface terminal transitions: toast + invalidate the parent list.
+  // Surface terminal transitions: toast + invalidate the parent list. Guarded
+  // by a ref keyed on jobId so a re-render that re-mounts this row with cached
+  // terminal-status data doesn't re-fire the toast (which caused a visible
+  // toast loop when the parent list invalidated the query after `onTerminal`).
+  const firedTerminalRef = useRef<string | null>(null)
   useEffect(() => {
     if (!detail) return
+    if (detail.status !== 'completed' && detail.status !== 'failed') return
+    if (firedTerminalRef.current === job.id) return
+    firedTerminalRef.current = job.id
     if (detail.status === 'completed') {
       toast.success(`Draft "${detail.payload?.name ?? ''}" siap untuk ditinjau`)
-      onTerminal()
-    } else if (detail.status === 'failed') {
+    } else {
       toast.error(detail.errorMessage ?? 'Riset AI gagal')
-      onTerminal()
     }
-  }, [detail, onTerminal])
+    onTerminal()
+  }, [detail, onTerminal, job.id])
 
   const figureSlug = effective.figureSlug ?? null
   const status = effective.status as JobStatus

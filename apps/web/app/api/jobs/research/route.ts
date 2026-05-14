@@ -58,6 +58,7 @@ import {
   fetchPage,
   RateLimitExceededError,
   searchWhitelist,
+  webSearchSalafi,
 } from '@/lib/server/research'
 
 export const runtime = 'nodejs'
@@ -65,6 +66,98 @@ export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 const MAX_SOURCES = 5
+
+// ─── Helpers shared by runResearch + handleFigureReIngest ───────────
+//
+// `fetchSources(urls)` — walks the URL list, fetches up to MAX_SOURCES
+// successfully, and bubbles rate-limit errors as a sentinel value so the
+// caller can shape the right top-level response (runResearch returns a
+// RunResearchFailure; handleFigureReIngest writes the failed job row).
+type FetchedSource = { url: string; content: string }
+
+interface FetchSourcesResult {
+  fetched: FetchedSource[]
+  rateLimited: RateLimitExceededError | null
+}
+
+type JobLogger = typeof logger
+
+async function fetchSources(
+  urls: string[],
+  log: JobLogger,
+  label: string,
+): Promise<FetchSourcesResult> {
+  const fetched: FetchedSource[] = []
+  for (const url of urls) {
+    if (fetched.length >= MAX_SOURCES) break
+    try {
+      const res = await fetchPage(url)
+      fetched.push({ url: res.finalUrl, content: res.html })
+    } catch (err) {
+      if (err instanceof RateLimitExceededError) {
+        log.warn(
+          { url, retryAfterMs: err.retryAfterMs, label },
+          'rate-limited; requeue',
+        )
+        return { fetched, rateLimited: err }
+      }
+      log.warn(
+        { url, err: (err as Error).message, label },
+        'fetch failed; skipping source',
+      )
+    }
+  }
+  return { fetched, rateLimited: null }
+}
+
+// `tryExtractFigure(...)` — run the LLM extractor and shape errors into a
+// RunResearchFailure so callers can return it verbatim. Wrapped in a union
+// type so success vs failure is structurally distinct.
+type ExtractFigureAttempt =
+  | { result: Awaited<ReturnType<typeof extractFigureData>> }
+  | { failure: RunResearchFailure }
+
+async function tryExtractFigure(
+  name: string,
+  sources: FetchedSource[],
+  hints: string | undefined,
+  log: JobLogger,
+): Promise<ExtractFigureAttempt | null> {
+  if (sources.length === 0) return null
+  const hinted = hints
+    ? [
+        ...sources,
+        {
+          url: 'admin://hints',
+          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hints}`,
+        },
+      ]
+    : sources
+  try {
+    const result = await extractFigureData(name, hinted)
+    return { result }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: string }).code === 'CONFLICT'
+    ) {
+      log.error({ err: message }, 'agent role not configured for figure_writer')
+      return {
+        failure: {
+          ok: false,
+          code: 'provider_not_configured',
+          message:
+            'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
+        },
+      }
+    }
+    log.error({ err: message }, 'LLM extraction threw')
+    return { failure: { ok: false, code: 'internal_error', message } }
+  }
+}
 
 // Legacy batch payload — kept verbatim for backwards compat with the
 // existing `POST /api/v1/admin/research` endpoint.
@@ -224,40 +317,79 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     }
   }
 
-  // ── 1. Candidate URLs ───────────────────────────────────────────────
+  // ── 1. Try whitelist sources first (preferred — vetted domains). ────
   let candidateUrls = input.sourceUrls ?? []
   if (candidateUrls.length === 0) {
     const domains = await loadActiveWhitelist()
     candidateUrls = await searchWhitelist(input.figureName, domains)
   }
-  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2) // headroom for failures
+  candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
 
-  // ── 2. Fetch ─────────────────────────────────────────────────────────
-  const fetched: { url: string; content: string }[] = []
-  for (const url of candidateUrls) {
-    if (fetched.length >= MAX_SOURCES) break
-    try {
-      const res = await fetchPage(url)
-      fetched.push({ url: res.finalUrl, content: res.html })
-    } catch (err) {
-      if (err instanceof RateLimitExceededError) {
-        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
-        return {
-          ok: false,
-          code: 'rate_limited',
-          message: err.message,
-          retryAfterMs: err.retryAfterMs,
-        }
-      }
-      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+  const fetchAttempt = await fetchSources(candidateUrls, log, 'whitelist')
+  if (fetchAttempt.rateLimited) {
+    return {
+      ok: false,
+      code: 'rate_limited',
+      message: fetchAttempt.rateLimited.message,
+      retryAfterMs: fetchAttempt.rateLimited.retryAfterMs,
     }
   }
 
-  if (fetched.length === 0) {
+  let fetched = fetchAttempt.fetched
+  let extraction = fetched.length > 0
+    ? await tryExtractFigure(input.figureName, fetched, input.hints, log)
+    : null
+  if (extraction && 'failure' in extraction) {
+    return extraction.failure
+  }
+
+  // ── 2. DDG salafi fallback ───────────────────────────────────────────
+  // If whitelist gave zero usable sources, or extraction came back with no
+  // name (= sources irrelevant), retry via DuckDuckGo HTML with a
+  // "biografi salaf" suffix. No API key needed; results bias toward salafi
+  // articles by query keyword.
+  const needsFallback =
+    !extraction ||
+    !extraction.result.figureData.nameFullAr &&
+      !extraction.result.figureData.nameFullId
+  if (needsFallback) {
     log.warn(
       { figureName: input.figureName },
-      'no sources fetched — whitelist returned no usable URLs',
+      'whitelist path yielded no usable extraction — falling back to DDG salaf search',
     )
+    const ddgUrls = await webSearchSalafi(input.figureName, { limit: MAX_SOURCES * 2 })
+    if (ddgUrls.length > 0) {
+      const ddgAttempt = await fetchSources(ddgUrls, log, 'ddg-salaf')
+      if (ddgAttempt.rateLimited) {
+        return {
+          ok: false,
+          code: 'rate_limited',
+          message: ddgAttempt.rateLimited.message,
+          retryAfterMs: ddgAttempt.rateLimited.retryAfterMs,
+        }
+      }
+      if (ddgAttempt.fetched.length > 0) {
+        const ddgExtract = await tryExtractFigure(
+          input.figureName,
+          ddgAttempt.fetched,
+          input.hints,
+          log,
+        )
+        if (ddgExtract && 'failure' in ddgExtract) return ddgExtract.failure
+        if (
+          ddgExtract &&
+          (ddgExtract.result.figureData.nameFullAr ||
+            ddgExtract.result.figureData.nameFullId)
+        ) {
+          // DDG produced something usable — swap in.
+          fetched = ddgAttempt.fetched
+          extraction = ddgExtract
+        }
+      }
+    }
+  }
+
+  if (!extraction) {
     return {
       ok: false,
       code: 'no_sources',
@@ -266,51 +398,12 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
     }
   }
 
-  // ── 3. LLM extract ───────────────────────────────────────────────────
-  // The hint string is light-touch context for the LLM (no schema impact).
-  const hintedSources = input.hints
-    ? [
-        ...fetched,
-        {
-          url: 'admin://hints',
-          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${input.hints}`,
-        },
-      ]
-    : fetched
+  const { figureData, citations: cites, nasabChain, modelUsed } = extraction.result
 
-  let extraction
-  try {
-    extraction = await extractFigureData(input.figureName, hintedSources)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    // Catch the `AIRegistryError('CONFLICT', ...)` shape from packages/ai
-    // when the `agent` role has no model configured.
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code?: string }).code === 'CONFLICT'
-    ) {
-      log.error({ err: message }, 'agent role not configured for figure_writer')
-      return {
-        ok: false,
-        code: 'provider_not_configured',
-        message:
-          'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
-      }
-    }
-    log.error({ err: message }, 'LLM extraction threw')
-    return { ok: false, code: 'internal_error', message }
-  }
-
-  const { figureData, citations: cites, nasabChain, modelUsed } = extraction
-
-  // Refuse to insert a row that doesn't even have an Arabic name — that's
-  // the "if sources didn't yield this figure" signal.
   if (!figureData.nameFullAr && !figureData.nameFullId) {
     log.warn(
       { figureName: input.figureName, sources: fetched.map((s) => s.url) },
-      'extractor returned no name — sources likely unrelated; aborting',
+      'extractor returned no name even after DDG fallback — aborting',
     )
     return {
       ok: false,
@@ -652,6 +745,19 @@ function isEmptyValue(v: unknown): boolean {
   return false
 }
 
+/** Loose equality for diff capture — handles string trim, array order-sensitive
+ *  compare, and treats null/undefined/'' interchangeably. */
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (isEmptyValue(a) && isEmptyValue(b)) return true
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+    return true
+  }
+  if (typeof a === 'string' && typeof b === 'string') return a.trim() === b.trim()
+  return a === b
+}
+
 async function handleFigureReIngest(jobId: string): Promise<Response> {
   const log = logger.child({
     route: '/api/jobs/research',
@@ -737,35 +843,124 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   // 6. Run the AI extraction. We deliberately DO NOT reuse `runResearch`
   //    because that helper INSERTs a new draft row. The re-ingest path only
   //    UPDATEs the existing row.
+  //
+  //    Whitelist first; if extraction yields no name (sources irrelevant)
+  //    we fall back to DuckDuckGo HTML with a `biografi salaf` suffix so the
+  //    pipeline still has something to extract from.
   const domains = await loadActiveWhitelist()
   let candidateUrls = await searchWhitelist(payload.name, domains)
   candidateUrls = candidateUrls.slice(0, MAX_SOURCES * 2)
 
-  const fetched: { url: string; content: string }[] = []
-  for (const url of candidateUrls) {
-    if (fetched.length >= MAX_SOURCES) break
-    try {
-      const res = await fetchPage(url)
-      fetched.push({ url: res.finalUrl, content: res.html })
-    } catch (err) {
-      if (err instanceof RateLimitExceededError) {
-        log.warn({ url, retryAfterMs: err.retryAfterMs }, 'rate-limited; requeue')
-        await markFailed(jobId, 'rate_limited', err.message)
+  // Compose the focus-field hint once; used for both attempts.
+  const focusList = payload.focusFields ?? []
+  const hintParts: string[] = []
+  if (payload.hints) hintParts.push(payload.hints)
+  if (focusList.length > 0) {
+    hintParts.push(
+      `Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`,
+    )
+  }
+  const combinedHints = hintParts.length > 0 ? hintParts.join('\n') : undefined
+
+  const whitelistFetch = await fetchSources(candidateUrls, log, 'whitelist')
+  if (whitelistFetch.rateLimited) {
+    await markFailed(jobId, 'rate_limited', whitelistFetch.rateLimited.message)
+    return Response.json(
+      {
+        ok: false,
+        error: { code: 'RATE_LIMITED', message: whitelistFetch.rateLimited.message },
+      },
+      {
+        status: 429,
+        headers: {
+          'retry-after': String(Math.ceil(whitelistFetch.rateLimited.retryAfterMs / 1000)),
+        },
+      },
+    )
+  }
+
+  let fetched = whitelistFetch.fetched
+  let extractionAttempt = fetched.length > 0
+    ? await tryExtractFigure(payload.name, fetched, combinedHints, log)
+    : null
+  if (extractionAttempt && 'failure' in extractionAttempt) {
+    const failure = extractionAttempt.failure
+    if (failure.code === 'provider_not_configured') {
+      await markFailed(jobId, 'provider_not_configured', failure.message)
+      return Response.json(
+        { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
+        { status: 503 },
+      )
+    }
+    await markFailed(jobId, 'internal_error', failure.message)
+    return Response.json(
+      { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
+      { status: 500 },
+    )
+  }
+
+  const needsFallback =
+    !extractionAttempt ||
+    (!extractionAttempt.result.figureData.nameFullAr &&
+      !extractionAttempt.result.figureData.nameFullId)
+  if (needsFallback) {
+    log.warn(
+      { jobId, name: payload.name },
+      'whitelist path yielded no usable extraction — falling back to DDG salaf search',
+    )
+    const ddgUrls = await webSearchSalafi(payload.name, { limit: MAX_SOURCES * 2 })
+    if (ddgUrls.length > 0) {
+      const ddgFetch = await fetchSources(ddgUrls, log, 'ddg-salaf')
+      if (ddgFetch.rateLimited) {
+        await markFailed(jobId, 'rate_limited', ddgFetch.rateLimited.message)
         return Response.json(
-          { ok: false, error: { code: 'RATE_LIMITED', message: err.message } },
+          {
+            ok: false,
+            error: { code: 'RATE_LIMITED', message: ddgFetch.rateLimited.message },
+          },
           {
             status: 429,
             headers: {
-              'retry-after': String(Math.ceil(err.retryAfterMs / 1000)),
+              'retry-after': String(Math.ceil(ddgFetch.rateLimited.retryAfterMs / 1000)),
             },
           },
         )
       }
-      log.warn({ url, err: (err as Error).message }, 'fetch failed; skipping source')
+      if (ddgFetch.fetched.length > 0) {
+        const ddgExtract = await tryExtractFigure(
+          payload.name,
+          ddgFetch.fetched,
+          combinedHints,
+          log,
+        )
+        if (ddgExtract && 'failure' in ddgExtract) {
+          const failure = ddgExtract.failure
+          if (failure.code === 'provider_not_configured') {
+            await markFailed(jobId, 'provider_not_configured', failure.message)
+            return Response.json(
+              { ok: false, error: { code: 'PROVIDER_NOT_CONFIGURED', message: failure.message } },
+              { status: 503 },
+            )
+          }
+          await markFailed(jobId, 'internal_error', failure.message)
+          return Response.json(
+            { ok: false, error: { code: 'INTERNAL_ERROR', message: failure.message } },
+            { status: 500 },
+          )
+        }
+        if (
+          ddgExtract &&
+          (ddgExtract.result.figureData.nameFullAr ||
+            ddgExtract.result.figureData.nameFullId)
+        ) {
+          fetched = ddgFetch.fetched
+          extractionAttempt = ddgExtract
+        }
+      }
     }
   }
 
-  if (fetched.length === 0) {
+  if (!extractionAttempt) {
     const msg =
       'Tidak ada sumber yang dapat dikutip untuk tokoh ini. Tambahkan domain whitelist atau ubah ejaan nama.'
     await markFailed(jobId, 'no_sources', msg)
@@ -775,61 +970,7 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     )
   }
 
-  // Bias the prompt toward the focusFields by appending an admin-hints
-  // message: the LLM still emits the full schema, but we tell it which
-  // columns the admin cares about most.
-  const focusList = payload.focusFields ?? []
-  const hintParts: string[] = []
-  if (payload.hints) hintParts.push(payload.hints)
-  if (focusList.length > 0) {
-    hintParts.push(
-      `Fokuskan ekstraksi pada kolom berikut: ${focusList.join(', ')}.`,
-    )
-  }
-  const hintedSources = hintParts.length > 0
-    ? [
-        ...fetched,
-        {
-          url: 'admin://hints',
-          content: `Petunjuk admin (gunakan sebagai konteks, bukan fakta):\n${hintParts.join('\n')}`,
-        },
-      ]
-    : fetched
-
-  let extraction
-  try {
-    extraction = await extractFigureData(payload.name, hintedSources)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (
-      typeof err === 'object' &&
-      err !== null &&
-      'code' in err &&
-      (err as { code?: string }).code === 'CONFLICT'
-    ) {
-      log.error({ err: message }, 'agent role not configured for figure_writer')
-      await markFailed(jobId, 'provider_not_configured', message)
-      return Response.json(
-        {
-          ok: false,
-          error: {
-            code: 'PROVIDER_NOT_CONFIGURED',
-            message:
-              'Provider AI untuk role agent belum dikonfigurasi. Buka admin → AI Providers untuk mengaktifkan model.',
-          },
-        },
-        { status: 503 },
-      )
-    }
-    log.error({ err: message }, 'LLM extraction threw')
-    await markFailed(jobId, 'internal_error', message)
-    return Response.json(
-      { ok: false, error: { code: 'INTERNAL_ERROR', message } },
-      { status: 500 },
-    )
-  }
-
-  const { figureData, citations: cites, modelUsed } = extraction
+  const { figureData, citations: cites, modelUsed } = extractionAttempt.result
 
   // 7. Build the per-mode merge patch.
   const mode: 'enrich' | 'replace' = payload.mode ?? 'enrich'
@@ -856,8 +997,19 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     const aiValue = figureData[field as keyof typeof figureData] as unknown
     if (isEmptyValue(aiValue)) continue
     const currentValue = currentFigure[field] as unknown
+
+    // Always surface AI's proposal in `suggestions` if it differs from the
+    // current value — this drives the "Tinjau diff" dialog. Auto-apply is a
+    // separate, more conservative gate handled by `patch` below. Decoupling
+    // the two means an admin in `enrich` mode can still review (and manually
+    // accept) AI's alternative for a field that's already filled.
+    if (!valuesEqual(aiValue, currentValue)) {
+      suggestions[field] = aiValue
+      previous[field] = currentValue
+    }
+
     if (mode === 'enrich') {
-      // Only fill if the current row has nothing.
+      // Auto-fill only if the current row has nothing.
       if (!isEmptyValue(currentValue)) continue
     } else {
       // replace mode — only the explicitly-named fields are touched.
@@ -868,8 +1020,6 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     // `FigureExtractionSchema` (extract.ts) was built from the same schema.
     ;(patch as Record<string, unknown>)[field] = aiValue
     fieldsChanged.push(field)
-    suggestions[field] = aiValue
-    previous[field] = currentValue
   }
 
   // 8. UPDATE the figure row only if we actually have something to change.

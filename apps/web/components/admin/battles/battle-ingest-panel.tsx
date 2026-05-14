@@ -16,7 +16,7 @@
 
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
@@ -197,16 +197,21 @@ function ActiveJobRow({ job, pollEnabled, onTerminal }: ActiveJobRowProps) {
     return { ...job, ...(detail ?? {}) } as IngestJobRow & Partial<JobDetail>
   }, [job, detail])
 
+  // Guard with a ref keyed by jobId so re-renders that re-mount this row with
+  // cached terminal-status data don't re-fire the toast (loop bug).
+  const firedTerminalRef = useRef<string | null>(null)
   useEffect(() => {
     if (!detail) return
+    if (detail.status !== 'completed' && detail.status !== 'failed') return
+    if (firedTerminalRef.current === job.id) return
+    firedTerminalRef.current = job.id
     if (detail.status === 'completed') {
       toast.success(`Draf "${detail.payload?.name ?? ''}" siap untuk ditinjau`)
-      onTerminal()
-    } else if (detail.status === 'failed') {
+    } else {
       toast.error(detail.errorMessage ?? 'Riset AI gagal')
-      onTerminal()
     }
-  }, [detail, onTerminal])
+    onTerminal()
+  }, [detail, onTerminal, job.id])
 
   const battleSlug = effective.battleSlug ?? null
   const status = effective.status as JobStatus
