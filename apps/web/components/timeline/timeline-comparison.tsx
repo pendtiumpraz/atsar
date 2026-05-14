@@ -93,15 +93,11 @@ export function TimelineComparison({ figures }: TimelineComparisonProps) {
     }
   }, [zoom])
 
-  const showZoom = rows.length > 0
-
   return (
     <div className="flex flex-col gap-3">
-      {showZoom && (
-        <div className="flex justify-end">
-          <ZoomControl value={zoom} onChange={setZoom} />
-        </div>
-      )}
+      <div className="flex justify-end">
+        <ZoomControl value={zoom} onChange={setZoom} />
+      </div>
       <TimelineSvg
         figures={rows}
         zoom={zoom}

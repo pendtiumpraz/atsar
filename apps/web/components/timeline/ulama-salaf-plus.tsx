@@ -218,11 +218,9 @@ export function UlamaSalafPlus({ mode: _mode = 'h' }: UlamaSalafPlusProps) {
         </div>
       ) : (
         <>
-          {svgFigures.length > 0 && (
-            <div className="flex justify-end">
-              <ZoomControl value={zoom} onChange={setZoom} />
-            </div>
-          )}
+          <div className="flex justify-end">
+            <ZoomControl value={zoom} onChange={setZoom} />
+          </div>
           <TimelineSvg figures={svgFigures} bands={BANDS} zoom={zoom} />
           {truncated && (
             <div className="flex justify-center">

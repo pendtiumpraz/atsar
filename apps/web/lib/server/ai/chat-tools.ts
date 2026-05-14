@@ -484,6 +484,7 @@ export type ChatTools = ReturnType<typeof chatTools>
 const BATTLE_TYPE_VALUES = ['ghazwah', 'sariyyah', 'futuhat'] as const
 
 const FIGURE_REINGEST_FIELDS = [
+  // Canonical DB columns
   'nameFullAr',
   'nameFullId',
   'kunyahAr',
@@ -497,7 +498,40 @@ const FIGURE_REINGEST_FIELDS = [
   'biographyAr',
   'biographyId',
   'citations',
+  // Friendly group aliases the AI tends to emit. Expanded server-side
+  // (see expandFigureFocusAliases) into the canonical column list
+  // before the service call. Accepting both shapes prevents
+  // "Invalid request body" 422s when the model says
+  // focusFields:['biography','summary'] instead of the column names.
+  'biography',
+  'summary',
+  'names',
+  'kunyah',
+  'dates',
+  'rijal',
+  'madhab',
 ] as const
+
+const FIGURE_FIELD_ALIASES: Record<string, string[]> = {
+  biography: ['biographyId', 'biographyAr'],
+  summary: ['summaryId', 'summaryAr'],
+  names: ['nameFullId', 'nameFullAr'],
+  kunyah: ['kunyahId', 'kunyahAr'],
+  dates: ['birthDateAh', 'deathDateAh'],
+  rijal: ['specialty', 'socialCategory'],
+  madhab: ['specialty'],
+}
+
+function expandFigureFocusAliases(focusFields?: string[]): string[] | undefined {
+  if (!focusFields || focusFields.length === 0) return focusFields
+  const out = new Set<string>()
+  for (const f of focusFields) {
+    const alias = FIGURE_FIELD_ALIASES[f]
+    if (alias) for (const col of alias) out.add(col)
+    else out.add(f)
+  }
+  return Array.from(out)
+}
 
 const BATTLE_REINGEST_FIELDS = [
   'nameAr',
@@ -664,7 +698,7 @@ export function adminChatTools(userId: string | null) {
         const result = await reingestFigure(userId!, {
           slug,
           mode,
-          focusFields,
+          focusFields: expandFigureFocusAliases(focusFields),
           hints,
         })
         return {
@@ -702,7 +736,7 @@ export function adminChatTools(userId: string | null) {
         const result = await reingestFiguresBatch(userId!, {
           slugs,
           mode,
-          focusFields,
+          focusFields: expandFigureFocusAliases(focusFields),
           hints,
         })
         return {
