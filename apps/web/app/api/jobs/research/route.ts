@@ -171,6 +171,36 @@ function extractionLooksSubstantive(
   return populated >= 3
 }
 
+/**
+ * Re-ingest variant of `extractionLooksSubstantive`: compares AI output
+ * against the current row and the admin's focus fields. Passes ONLY when
+ * AI proposed a non-empty value that differs from current for at least
+ * one focus field. If `focusFields` is empty (admin asked for the full
+ * sweep) we fall through to the general substantive check.
+ *
+ * This is the gate that catches the Bin Baz failure mode: current row
+ * has summary/kunyah/dates filled, AI echoes them back null-biography
+ * because the source HTML had no biography text, suggestions ends up
+ * empty. Without this check, the broader `extractionLooksSubstantive`
+ * sees ≥3 populated scalars + a long summary and passes — fallback
+ * never fires.
+ */
+function extractionAddsValueOverCurrent(
+  aiData: Awaited<ReturnType<typeof extractFigureData>>['figureData'],
+  current: Record<string, unknown>,
+  focusFields: readonly string[],
+): boolean {
+  // No focus specified → preserve the original gate.
+  if (focusFields.length === 0) return extractionLooksSubstantive(aiData)
+  for (const field of focusFields) {
+    const ai = (aiData as Record<string, unknown>)[field]
+    const cur = current[field]
+    if (isEmptyValue(ai)) continue
+    if (!valuesEqual(ai, cur)) return true
+  }
+  return false
+}
+
 async function tryFallbackTier(
   name: string,
   urls: string[],
@@ -276,6 +306,24 @@ function battleExtractionLooksSubstantive(
   if (data.participants && data.participants.length > 0) populated++
   if (data.phases && data.phases.length > 0) populated++
   return populated >= 3
+}
+
+/** Battle counterpart of `extractionAddsValueOverCurrent`. Re-ingest
+ *  needs to know that AI added new info vs the existing row, not just
+ *  that AI returned a non-empty payload. */
+function battleExtractionAddsValueOverCurrent(
+  aiData: Awaited<ReturnType<typeof extractBattleData>>['battleData'],
+  current: Record<string, unknown>,
+  focusFields: readonly string[],
+): boolean {
+  if (focusFields.length === 0) return battleExtractionLooksSubstantive(aiData)
+  for (const field of focusFields) {
+    const ai = (aiData as Record<string, unknown>)[field]
+    const cur = current[field]
+    if (isEmptyValue(ai)) continue
+    if (!valuesEqual(ai, cur)) return true
+  }
+  return false
 }
 
 async function tryFallbackTierBattle(
@@ -1224,12 +1272,23 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
     if (initial) extractionAttempt = initial
   }
 
-  // Mirror runResearch — also fall back when AI echoed a name but wrote
-  // null for every substantive field (the "search-result-page-as-source"
-  // failure mode). See the matching comment above runResearch.
+  // Re-ingest fallback gate differs from the new-row gate:
+  //   - For a brand-new figure, "substantive" = AI returned a name + some
+  //     fields (handled by `extractionLooksSubstantive`).
+  //   - For a re-ingest, the current row often ALREADY has scalar fields
+  //     populated (kunyah, dates, madhab, specialty, …). AI echoing
+  //     those back makes `extractionLooksSubstantive` falsely pass, even
+  //     when the admin asked for biography and AI returned null for it.
+  //   - The real signal: did AI propose at least one focus field with a
+  //     value DIFFERENT from current? If not, fall back to DDG.
+  const focusFieldList = (payload.focusFields ?? []) as readonly string[]
   const needsFallback =
     !extractionAttempt ||
-    !extractionLooksSubstantive(extractionAttempt.result.figureData)
+    !extractionAddsValueOverCurrent(
+      extractionAttempt.result.figureData,
+      currentFigure,
+      focusFieldList,
+    )
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
@@ -2145,12 +2204,19 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
     if (initial) extractionAttempt = initial
   }
 
-  // 6. Fallback ladder — DDG within whitelist (tier A), then broader salafi
-  //    search (tier B). Mirrors `handleBattleIngest` including the
-  //    substantive-extraction check so a name-only echo triggers fallback.
+  // 6. Fallback ladder. Like the figure re-ingest gate, we check whether
+  //    AI added value over the current battle row — for ingest the
+  //    generic substantive check is fine, but a re-ingest where the row
+  //    already has name + dates + outcome but null narrative would
+  //    falsely pass without the focus-aware comparison.
+  const battleFocusList = (payload.focusFields ?? []) as readonly string[]
   const needsFallback =
     !extractionAttempt ||
-    !battleExtractionLooksSubstantive(extractionAttempt.result.battleData)
+    !battleExtractionAddsValueOverCurrent(
+      extractionAttempt.result.battleData,
+      currentBattle,
+      battleFocusList,
+    )
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
