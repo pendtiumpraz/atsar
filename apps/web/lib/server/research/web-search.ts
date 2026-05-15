@@ -76,6 +76,20 @@ export interface WebSearchWithinDomainsOptions {
   maxDomains?: number
 }
 
+export interface WhitelistDomainSpec {
+  domain: string
+  primaryLanguage?: string | null
+}
+
+export interface DualLangSearchInput {
+  /** Arabic name (e.g. `العباس بن عبد المطلب`). Used to query Arabic-language
+   *  whitelist domains. Optional — fall back to `nameId` when absent. */
+  nameAr?: string | null
+  /** Indonesian transliteration (e.g. `Abbas bin Abdul Muthalib`). Used to
+   *  query Indonesian + English whitelist domains. */
+  nameId?: string | null
+}
+
 /**
  * Run a websearch via DuckDuckGo HTML and return the top result URLs.
  *
@@ -125,15 +139,108 @@ export async function webSearchWithinWhitelist(
   const fullQuery = `${normalized} (${siteOps})`
   const limit = opts.limit ?? 10
   const urls = await runDdgQuery(fullQuery, limit, opts.timeoutMs)
+  return filterToWhitelist(urls, selected)
+}
 
-  // Defence in depth: filter to whitelist-only in case DDG returns
-  // off-domain results (rare but happens with edge cases like cached
-  // pages or AMP variants on third-party CDNs).
-  const allowed = new Set(selected.map((d) => d.toLowerCase()))
+/**
+ * Dual-language whitelist search. Splits domains by `primaryLanguage`:
+ *   - `ar` domains (dorar.net, islamqa.info, shamela.ws, binbaz.org.sa, …)
+ *     get queried with the Arabic figure name.
+ *   - `id` / `en` / unknown domains (almanhaj.or.id, rumaysho.com,
+ *     muslim.or.id, sunnah.com, …) get queried with the Indonesian
+ *     transliteration.
+ *
+ * Why: DDG's `site:` operator is matched against the page's *indexed*
+ * tokens. An Arabic page has Arabic tokens; querying it with the Latin
+ * transliteration produces zero matches even when the article is there.
+ * Splitting the search recovers both halves of the whitelist.
+ *
+ * URLs from both buckets are merged + deduped before return. Hard cap
+ * `limit` total. Domains without a `primaryLanguage` are queried with
+ * whichever name is non-empty, preferring Indonesian.
+ */
+export async function webSearchWithinWhitelistDual(
+  input: DualLangSearchInput,
+  domains: WhitelistDomainSpec[],
+  opts: WebSearchWithinDomainsOptions = {},
+): Promise<string[]> {
+  const nameAr = normalizeFigureNameForSearch(input.nameAr ?? '')
+  const nameId = normalizeFigureNameForSearch(input.nameId ?? '')
+  if ((!nameAr && !nameId) || domains.length === 0) return []
+
+  const cap = opts.maxDomains ?? 6
+  const limit = opts.limit ?? 10
+  const arabicDomains: string[] = []
+  const otherDomains: string[] = []
+  for (const d of domains) {
+    if (d.primaryLanguage === 'ar') arabicDomains.push(d.domain)
+    else otherDomains.push(d.domain)
+  }
+
+  const queries: Array<Promise<string[]>> = []
+  if (nameAr && arabicDomains.length > 0) {
+    const selected = arabicDomains.slice(0, cap)
+    const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
+    queries.push(
+      runDdgQuery(`${nameAr} (${siteOps})`, limit, opts.timeoutMs).then((urls) =>
+        filterToWhitelist(urls, selected),
+      ),
+    )
+  }
+  if (nameId && otherDomains.length > 0) {
+    const selected = otherDomains.slice(0, cap)
+    const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
+    queries.push(
+      runDdgQuery(`${nameId} (${siteOps})`, limit, opts.timeoutMs).then((urls) =>
+        filterToWhitelist(urls, selected),
+      ),
+    )
+  }
+  // Fallback when the figure has only one language filled — still try the
+  // other name against the opposite bucket so we don't lose half the
+  // whitelist by omission.
+  if (nameId && arabicDomains.length > 0 && !nameAr) {
+    const selected = arabicDomains.slice(0, cap)
+    const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
+    queries.push(
+      runDdgQuery(`${nameId} (${siteOps})`, limit, opts.timeoutMs).then((urls) =>
+        filterToWhitelist(urls, selected),
+      ),
+    )
+  }
+  if (nameAr && otherDomains.length > 0 && !nameId) {
+    const selected = otherDomains.slice(0, cap)
+    const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
+    queries.push(
+      runDdgQuery(`${nameAr} (${siteOps})`, limit, opts.timeoutMs).then((urls) =>
+        filterToWhitelist(urls, selected),
+      ),
+    )
+  }
+
+  const settled = await Promise.allSettled(queries)
+  const merged: string[] = []
+  const seen = new Set<string>()
+  for (const r of settled) {
+    if (r.status !== 'fulfilled') continue
+    for (const url of r.value) {
+      if (seen.has(url)) continue
+      seen.add(url)
+      merged.push(url)
+      if (merged.length >= limit) return merged
+    }
+  }
+  return merged
+}
+
+/** Defence in depth: drop any URL whose host isn't in the whitelist set,
+ *  so DDG cache redirects / AMP variants can't smuggle off-domain results
+ *  past the caller. Matches host or any `<subdomain>.host`. */
+function filterToWhitelist(urls: string[], allowedDomains: string[]): string[] {
+  const allowed = new Set(allowedDomains.map((d) => d.toLowerCase()))
   return urls.filter((u) => {
     try {
       const host = new URL(u).hostname.toLowerCase()
-      // Match host or any "<subdomain>.host" suffix against the whitelist.
       return [...allowed].some((d) => host === d || host.endsWith(`.${d}`))
     } catch {
       return false

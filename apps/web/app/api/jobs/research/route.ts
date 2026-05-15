@@ -60,7 +60,7 @@ import {
   RateLimitExceededError,
   searchWhitelist,
   webSearchSalafi,
-  webSearchWithinWhitelist,
+  webSearchWithinWhitelistDual,
 } from '@/lib/server/research'
 
 export const runtime = 'nodejs'
@@ -388,11 +388,14 @@ function slugify(input: string): string {
   )
 }
 
-async function loadActiveWhitelist(): Promise<{ domain: string; priority: number }[]> {
+async function loadActiveWhitelist(): Promise<
+  { domain: string; priority: number; primaryLanguage: string | null }[]
+> {
   return db
     .select({
       domain: whitelistDomains.domain,
       priority: whitelistDomains.priority,
+      primaryLanguage: whitelistDomains.primaryLanguage,
     })
     .from(whitelistDomains)
     .where(and(eq(whitelistDomains.isActive, true), isNull(whitelistDomains.deletedAt)))
@@ -551,15 +554,21 @@ async function runResearch(input: RunResearchInput): Promise<RunResearchResult> 
   if (needsFallback) {
     const topDomains = [...whitelistDomainList]
       .sort((a, b) => b.priority - a.priority)
-      .map((d) => d.domain)
+      .map((d) => ({ domain: d.domain, primaryLanguage: d.primaryLanguage }))
 
     log.warn(
       { figureName: input.figureName },
-      'whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+      'whitelist path yielded no usable extraction — tier A: DDG within whitelist (dual-lang)',
     )
-    const tierAUrls = await webSearchWithinWhitelist(input.figureName, topDomains, {
-      limit: MAX_SOURCES * 2,
-    })
+    // First attempt didn't pin down a bilingual name pair, so we treat
+    // the input as the Indonesian transliteration AND, if the prior
+    // extraction yielded an Arabic name, use that for the Arabic bucket.
+    const arName = extraction?.result.figureData.nameFullAr ?? null
+    const tierAUrls = await webSearchWithinWhitelistDual(
+      { nameAr: arName, nameId: input.figureName },
+      topDomains,
+      { limit: MAX_SOURCES * 2 },
+    )
     const tierA = await tryFallbackTier(
       input.figureName,
       tierAUrls,
@@ -1224,15 +1233,17 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
-      .map((d) => d.domain)
+      .map((d) => ({ domain: d.domain, primaryLanguage: d.primaryLanguage }))
 
     log.warn(
       { jobId, name: payload.name },
-      'whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+      'whitelist path yielded no usable extraction — tier A: DDG within whitelist (dual-lang)',
     )
-    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
-      limit: MAX_SOURCES * 2,
-    })
+    const tierAUrls = await webSearchWithinWhitelistDual(
+      { nameAr: currentFigure.nameFullAr, nameId: currentFigure.nameFullId },
+      topDomains,
+      { limit: MAX_SOURCES * 2 },
+    )
     const tierA = await tryFallbackTier(
       payload.name,
       tierAUrls,
@@ -1678,15 +1689,21 @@ async function handleBattleIngest(jobId: string): Promise<Response> {
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
-      .map((d) => d.domain)
+      .map((d) => ({ domain: d.domain, primaryLanguage: d.primaryLanguage }))
 
     log.warn(
       { jobId, name: payload.name },
-      'battle whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+      'battle whitelist path yielded no usable extraction — tier A: DDG within whitelist (dual-lang)',
     )
-    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
-      limit: MAX_SOURCES * 2,
-    })
+    // No row yet (this is the ingest path); use AI's first extraction if
+    // it managed a name pair, else fall back to the input name as ID.
+    const ingestNameAr = extraction?.result.battleData.nameAr ?? null
+    const ingestNameId = extraction?.result.battleData.nameId ?? payload.name
+    const tierAUrls = await webSearchWithinWhitelistDual(
+      { nameAr: ingestNameAr, nameId: ingestNameId },
+      topDomains,
+      { limit: MAX_SOURCES * 2 },
+    )
     const tierA = await tryFallbackTierBattle(
       payload.name,
       tierAUrls,
@@ -2137,15 +2154,17 @@ async function handleBattleReIngest(jobId: string): Promise<Response> {
   if (needsFallback) {
     const topDomains = [...domains]
       .sort((a, b) => b.priority - a.priority)
-      .map((d) => d.domain)
+      .map((d) => ({ domain: d.domain, primaryLanguage: d.primaryLanguage }))
 
     log.warn(
       { jobId, name: payload.name },
-      'battle reingest whitelist path yielded no usable extraction — tier A: DDG within whitelist',
+      'battle reingest whitelist path yielded no usable extraction — tier A: DDG within whitelist (dual-lang)',
     )
-    const tierAUrls = await webSearchWithinWhitelist(payload.name, topDomains, {
-      limit: MAX_SOURCES * 2,
-    })
+    const tierAUrls = await webSearchWithinWhitelistDual(
+      { nameAr: currentBattle.nameAr ?? null, nameId: currentBattle.nameId ?? null },
+      topDomains,
+      { limit: MAX_SOURCES * 2 },
+    )
     const tierA = await tryFallbackTierBattle(
       payload.name,
       tierAUrls,
