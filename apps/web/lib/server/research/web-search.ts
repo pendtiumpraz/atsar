@@ -17,6 +17,36 @@
 
 const DDG_BASE = 'https://html.duckduckgo.com/html/'
 
+/**
+ * Strip honorifics, salaf-greeting suffixes, and stray punctuation that
+ * hurt search relevance. DDG sees `العباس بن عبد المطلب رضي الله عنه` and
+ * tries to match all five tokens exactly; almost no whitelist article
+ * carries the full greeting in its title, so the query returns zero hits.
+ *
+ * Patterns covered:
+ *   - Arabic: `رضي الله عنه`, `رضي الله عنها`, `صلى الله عليه وسلم`, `ﷺ`
+ *   - Indonesian/Latin: ` RA`, ` r.a.`, ` SAW`, ` s.a.w.`, ` AS`, ` a.s.`,
+ *     ` rh.`, ` rha.`, ` ra.`, ` rahimahullah`
+ *   - Brackets / quotes / repeated whitespace.
+ */
+export function normalizeFigureNameForSearch(raw: string): string {
+  let name = raw
+  // Arabic honorifics (with optional brackets).
+  name = name.replace(
+    /[(\[]?\s*(?:رضي\s*الله\s*عنه(?:م|ا|ما)?|صلى\s*الله\s*عليه\s*و(?:آله\s*و)?سلم|عليه\s*السلام|رحمه\s*الله|ﷺ)\s*[)\]]?/g,
+    '',
+  )
+  // Latin honorific suffixes — match a leading separator so we don't eat
+  // the figure's actual name when "ra" appears mid-word.
+  name = name.replace(
+    /(?:\s|^)(?:RA|R\.A\.|RA\.|SAW|S\.A\.W\.|SAW\.|AS|A\.S\.|rh\.?|rha\.?|ra\.?|rahimahullah|hafidzahullah)\b\.?/gi,
+    ' ',
+  )
+  // Collapse whitespace + drop stray punctuation pairs left behind.
+  name = name.replace(/[()[\]]/g, ' ').replace(/\s+/g, ' ').trim()
+  return name
+}
+
 // Browsers DDG accepts without challenging. Picking a desktop UA is more
 // likely to return the standard HTML layout than the mobile one.
 const UA =
@@ -61,10 +91,10 @@ export async function webSearchSalafi(
   query: string,
   opts: WebSearchOptions = {},
 ): Promise<string[]> {
-  const trimmed = query.trim()
-  if (!trimmed) return []
+  const normalized = normalizeFigureNameForSearch(query)
+  if (!normalized) return []
   const suffix = opts.suffix ?? 'biografi salaf'
-  const fullQuery = `${trimmed} ${suffix}`.trim()
+  const fullQuery = `${normalized} ${suffix}`.trim()
   return runDdgQuery(fullQuery, opts.limit ?? 10, opts.timeoutMs)
 }
 
@@ -87,12 +117,12 @@ export async function webSearchWithinWhitelist(
   domains: string[],
   opts: WebSearchWithinDomainsOptions = {},
 ): Promise<string[]> {
-  const trimmed = query.trim()
-  if (!trimmed || domains.length === 0) return []
+  const normalized = normalizeFigureNameForSearch(query)
+  if (!normalized || domains.length === 0) return []
   const cap = opts.maxDomains ?? 6
   const selected = domains.slice(0, cap)
   const siteOps = selected.map((d) => `site:${d}`).join(' OR ')
-  const fullQuery = `${trimmed} (${siteOps})`
+  const fullQuery = `${normalized} (${siteOps})`
   const limit = opts.limit ?? 10
   const urls = await runDdgQuery(fullQuery, limit, opts.timeoutMs)
 
