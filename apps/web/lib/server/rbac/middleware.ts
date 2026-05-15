@@ -6,7 +6,35 @@
 
 import { ApiError } from '@/lib/server/api'
 import { auth } from '@/lib/server/auth'
+import { limiters } from '@/lib/server/middleware/rate-limit'
 import { getEffectivePermissions } from './permissions.js'
+
+const MUTATION_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE'])
+
+/**
+ * Defence-in-depth: every authenticated admin mutation (POST/PATCH/PUT/
+ * DELETE under /api/v1/admin/*) burns one slot from the `adminMutation`
+ * limiter (60 / minute per admin). If a stolen admin session/cookie is
+ * abused to mass-edit content, the burst caps at 60 requests/min before
+ * the limiter throws 429. Read-only GETs are unaffected so day-to-day
+ * browsing isn't throttled.
+ *
+ * Skipped automatically for non-admin paths and non-mutation methods.
+ */
+async function applyAdminMutationRateLimit(
+  req: Request,
+  userId: string,
+): Promise<void> {
+  if (!MUTATION_METHODS.has(req.method.toUpperCase())) return
+  let pathname: string
+  try {
+    pathname = new URL(req.url).pathname
+  } catch {
+    return
+  }
+  if (!pathname.startsWith('/api/v1/admin/')) return
+  await limiters.adminMutation(userId)
+}
 
 export type PermissionContext = {
   userId: string
@@ -47,6 +75,7 @@ export function requirePermission(
     return (async () => {
       const ctx = await resolveUserId(arg1)
       await check(ctx.userId, s)
+      await applyAdminMutationRateLimit(arg1, ctx.userId)
       return ctx
     })()
   }

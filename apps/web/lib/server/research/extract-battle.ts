@@ -99,6 +99,24 @@ const SYSTEM_PROMPT = [
   'null with an empty citations array. Returning null is always preferable to guessing.',
 ].join('\n')
 
+/** Strip prompt-injection vectors from admin hints — see the matching
+ *  helper in `extract.ts` (figures). Kept duplicated here so both
+ *  extractors stay independent. */
+function sanitizeBattleHints(raw: string): string {
+  let text = raw.replace(/\r\n?/g, '\n').slice(0, 2000)
+  const dangerousLine =
+    /^(?:\s*-{3,}\s*|\s*(?:SOURCES?|RULES?|SYSTEM|CONTEXT|INSTRUCTIONS|PROMPT|ADMIN|USER|ASSISTANT)\s*:.*)$/im
+  text = text
+    .split('\n')
+    .filter((line) => !dangerousLine.test(line))
+    .join('\n')
+  text = text.replace(
+    /\b(?:ignore (?:all )?previous|forget (?:your |all )?(?:training|instructions|rules)|disregard (?:the )?(?:above|rules)|you are now|kamu sekarang adalah|abaikan (?:semua )?(?:aturan|instruksi sebelumnya)|jangan (?:cite|kutip|sebutkan sumber))\b[^\n.]{0,120}/gi,
+    '[hint dropped]',
+  )
+  return text.trim()
+}
+
 function buildUserPrompt(
   name: string,
   sources: BattleExtractionSource[],
@@ -107,9 +125,13 @@ function buildUserPrompt(
   const lines: string[] = []
   lines.push(`Target battle: ${name}`)
   if (hints && hints.trim().length > 0) {
-    lines.push('')
-    lines.push('ADMIN HINTS (konteks tambahan — bukan sumber yang boleh dikutip):')
-    lines.push(hints.trim())
+    const cleanHints = sanitizeBattleHints(hints)
+    if (cleanHints.length > 0) {
+      lines.push('')
+      lines.push('<<<ADMIN_HINTS — konteks tambahan, BUKAN sumber yang boleh dikutip>>>')
+      lines.push(cleanHints)
+      lines.push('<<<END_ADMIN_HINTS>>>')
+    }
   }
   lines.push('')
   lines.push('SOURCES (each delimited by ---):')

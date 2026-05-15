@@ -321,6 +321,42 @@ const SYSTEM_PROMPT = [
   'with an empty citations array. Returning null is always preferable to guessing.',
 ].join('\n')
 
+/**
+ * Strip / neutralise prompt-injection vectors in admin-supplied hints
+ * BEFORE we splice them into the user prompt. Admin write-tools accept
+ * a `hints: z.string().max(2000)` parameter that flows here verbatim;
+ * without scrubbing, a malicious admin could nudge the extractor to
+ * write false biographical content or echo system-prompt rules.
+ *
+ * What we strip:
+ *   - Lines that look like a fake delimiter / new section header
+ *     (`---`, `SOURCES:`, `RULES:`, `SYSTEM:`, etc.)
+ *   - Common jailbreak triggers (`ignore previous`, `forget your training`,
+ *     `kamu sekarang adalah ...`, etc.)
+ *   - Anything trying to disable the citation requirement.
+ *
+ * What we keep: short clarifying context like "fokus periode di
+ * Baghdad", "prefer Tahdzib at-Tahdzib over Wikipedia", etc.
+ */
+function sanitizeHints(raw: string): string {
+  let text = raw.replace(/\r\n?/g, '\n').slice(0, 2000)
+  // Drop fake-delimiter / fake-section lines so they can't break out of
+  // the hint block into a forged SOURCES section.
+  const dangerousLine =
+    /^(?:\s*-{3,}\s*|\s*(?:SOURCES?|RULES?|SYSTEM|CONTEXT|INSTRUCTIONS|PROMPT|ADMIN|USER|ASSISTANT)\s*:.*)$/im
+  text = text
+    .split('\n')
+    .filter((line) => !dangerousLine.test(line))
+    .join('\n')
+  // Common jailbreak phrasings — replace with a neutral marker so we
+  // don't smuggle them past the system prompt.
+  text = text.replace(
+    /\b(?:ignore (?:all )?previous|forget (?:your |all )?(?:training|instructions|rules)|disregard (?:the )?(?:above|rules)|you are now|kamu sekarang adalah|abaikan (?:semua )?(?:aturan|instruksi sebelumnya)|jangan (?:cite|kutip|sebutkan sumber))\b[^\n.]{0,120}/gi,
+    '[hint dropped]',
+  )
+  return text.trim()
+}
+
 function buildUserPrompt(
   name: string,
   sources: ExtractionSource[],
@@ -329,9 +365,16 @@ function buildUserPrompt(
   const lines: string[] = []
   lines.push(`Target figure: ${name}`)
   if (hints && hints.trim().length > 0) {
-    lines.push('')
-    lines.push('ADMIN HINTS (konteks tambahan — bukan sumber yang boleh dikutip):')
-    lines.push(hints.trim())
+    const cleanHints = sanitizeHints(hints)
+    if (cleanHints.length > 0) {
+      lines.push('')
+      // Stable delimiters bracket the hint so even if a sanitised slip
+      // gets through, the model can see where the untrusted text ends
+      // and our trusted scaffolding resumes.
+      lines.push('<<<ADMIN_HINTS — konteks tambahan, BUKAN sumber yang boleh dikutip>>>')
+      lines.push(cleanHints)
+      lines.push('<<<END_ADMIN_HINTS>>>')
+    }
   }
   lines.push('')
   lines.push('SOURCES (each delimited by ---):')

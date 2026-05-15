@@ -91,6 +91,12 @@ export const limiters = {
   /** PDF exports: 3 / minute. */
   pdfExport: (id: string): Promise<RateLimitResult> =>
     consume({ key: 'pdf-export', limit: 3, windowSec: 60 }, id),
+  /** Admin mutations (POST/PATCH/PUT/DELETE under `/api/v1/admin/*`):
+   *  60 / minute per admin. Defence-in-depth against a stolen admin
+   *  session/cookie — bulk-edit scripting is throttled. Read-only GETs
+   *  are intentionally NOT rate-limited so admins can browse freely. */
+  adminMutation: (id: string): Promise<RateLimitResult> =>
+    consume({ key: 'admin-mutation', limit: 60, windowSec: 60 }, id),
   /** Generic fallback: 60 / minute. */
   default: (id: string): Promise<RateLimitResult> =>
     consume({ key: 'default', limit: 60, windowSec: 60 }, id),
