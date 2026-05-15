@@ -60,6 +60,7 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Textarea } from '@/components/ui/textarea'
 import { api, ApiClientError } from '@/lib/api/client'
+import { cn } from '@/lib/utils'
 
 // Lazy-load the diff viewer so the heavy `react-diff-viewer-continued` chunk
 // only enters the bundle once the admin opens the side-by-side comparison.
@@ -324,11 +325,74 @@ export interface FigureReingestPanelProps {
   current: FigureReingestCurrentSnapshot
 }
 
+/** localStorage keys — keep the user's last mode + focus selection between
+ *  dialog open/close so "klik Timpa → tutup → buka lagi → ternyata reset ke
+ *  Enrich → submit tanpa sadar" can't silently happen again. */
+const REINGEST_MODE_STORAGE_KEY = 'admin:reingest:mode'
+const REINGEST_FOCUS_STORAGE_KEY = 'admin:reingest:focus'
+
+function readPersistedMode(): Mode {
+  if (typeof window === 'undefined') return 'enrich'
+  try {
+    const raw = window.localStorage.getItem(REINGEST_MODE_STORAGE_KEY)
+    if (raw === 'enrich' || raw === 'replace') return raw
+  } catch {
+    /* ignore */
+  }
+  return 'enrich'
+}
+
+function readPersistedFocus(): Set<string> {
+  const fallback = new Set(['biography', 'summary'])
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = window.localStorage.getItem(REINGEST_FOCUS_STORAGE_KEY)
+    if (!raw) return fallback
+    const arr = JSON.parse(raw) as unknown
+    if (Array.isArray(arr) && arr.every((v) => typeof v === 'string')) {
+      const set = new Set(arr as string[])
+      if (set.size > 0) return set
+    }
+  } catch {
+    /* ignore */
+  }
+  return fallback
+}
+
 export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps) {
-  // Form state
-  const [mode, setMode] = React.useState<Mode>('enrich')
-  const [focus, setFocus] = React.useState<Set<string>>(
-    () => new Set(['biography', 'summary']),
+  // Form state — initial values come from localStorage so the user's last
+  // explicit pick survives a dialog close/reopen. SSR-safe via the readers
+  // above (they return the default when `window` is undefined).
+  const [mode, setModeState] = React.useState<Mode>(() => readPersistedMode())
+  const [focus, setFocusState] = React.useState<Set<string>>(() => readPersistedFocus())
+  const setMode = React.useCallback((next: Mode) => {
+    setModeState(next)
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(REINGEST_MODE_STORAGE_KEY, next)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [])
+  const setFocus = React.useCallback(
+    (next: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+      setFocusState((prev) => {
+        const value = typeof next === 'function' ? next(prev) : next
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem(
+              REINGEST_FOCUS_STORAGE_KEY,
+              JSON.stringify(Array.from(value)),
+            )
+          } catch {
+            /* ignore */
+          }
+        }
+        return value
+      })
+    },
+    [],
   )
   const [hints, setHints] = React.useState('')
 
@@ -629,7 +693,12 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
               >
                 <label
                   htmlFor="reingest-mode-enrich"
-                  className="flex cursor-pointer items-start gap-3 rounded-md border border-[rgb(var(--border))] p-3 hover:bg-[rgb(var(--bg-elevated))]"
+                  className={cn(
+                    'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors',
+                    mode === 'enrich'
+                      ? 'border-[rgb(var(--accent))] bg-[rgb(var(--accent))]/10 ring-1 ring-[rgb(var(--accent))]'
+                      : 'border-[rgb(var(--border))] hover:bg-[rgb(var(--bg-elevated))]',
+                  )}
                 >
                   <RadioGroupItem value="enrich" id="reingest-mode-enrich" className="mt-1" />
                   <div>
@@ -641,13 +710,18 @@ export function FigureReingestPanel({ slug, current }: FigureReingestPanelProps)
                 </label>
                 <label
                   htmlFor="reingest-mode-replace"
-                  className="flex cursor-pointer items-start gap-3 rounded-md border border-[rgb(var(--border))] p-3 hover:bg-[rgb(var(--bg-elevated))]"
+                  className={cn(
+                    'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors',
+                    mode === 'replace'
+                      ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500'
+                      : 'border-[rgb(var(--border))] hover:bg-[rgb(var(--bg-elevated))]',
+                  )}
                 >
                   <RadioGroupItem value="replace" id="reingest-mode-replace" className="mt-1" />
                   <div>
-                    <div className="text-sm font-medium">Replace</div>
+                    <div className="text-sm font-medium">Replace (Timpa)</div>
                     <p className="text-xs text-[rgb(var(--text-muted))]">
-                      Timpa biografi &amp; ringkasan yang sudah ada.
+                      Timpa biografi &amp; ringkasan yang sudah ada. Hati-hati.
                     </p>
                   </div>
                 </label>

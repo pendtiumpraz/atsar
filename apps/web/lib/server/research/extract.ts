@@ -18,6 +18,8 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 import { getActiveModel, getModelInstance } from '@athar/ai'
 
+import { htmlToText } from './html-text.js'
+
 // ── Zod schema for the extraction output ──────────────────────────────
 // Mirrors the columns on `figures` (DATABASE.md §4) but only the subset that
 // a crawler can plausibly populate. Reviewer fills the rest by hand.
@@ -382,8 +384,13 @@ function buildUserPrompt(
     lines.push('---')
     lines.push(`URL: ${s.url}`)
     lines.push('CONTENT:')
-    // Cap each source to keep total prompt under ~32k chars.
-    lines.push(s.content.slice(0, 8000))
+    // Pre-process HTML → plain text BEFORE slicing. Raw HTML wastes the
+    // 8 KB window on navbar/scripts/sidebar; the article body often
+    // doesn't survive the truncation. `htmlToText` isolates <article>/
+    // <main>, strips chrome, decodes entities, and yields compact text
+    // that the LLM can actually read. We cap at 8000 chars per source
+    // (same budget) but those chars are now mostly biography.
+    lines.push(htmlToText(s.content, 8000))
   }
   lines.push('---')
   lines.push('')

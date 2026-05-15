@@ -21,6 +21,7 @@ import {
   type BattleExtractionData,
   type BattleExtractionResult,
 } from '@/lib/server/ai/battle-schema'
+import { htmlToText } from './html-text.js'
 
 /** A single source page fed into the extractor. */
 export interface BattleExtractionSource {
@@ -139,8 +140,10 @@ function buildUserPrompt(
     lines.push('---')
     lines.push(`URL: ${s.url}`)
     lines.push('CONTENT:')
-    // Cap each source to keep total prompt under ~32k chars.
-    lines.push(s.content.slice(0, 8000))
+    // HTML → plain text first (see extract.ts for rationale): isolate
+    // <article>/<main>, drop chrome + scripts, decode entities. The 8k
+    // slice budget now holds actual narrative instead of nav markup.
+    lines.push(htmlToText(s.content, 8000))
   }
   lines.push('---')
   lines.push('')
