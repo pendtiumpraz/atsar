@@ -1282,6 +1282,32 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
   //   - The real signal: did AI propose at least one focus field with a
   //     value DIFFERENT from current? If not, fall back to DDG.
   const focusFieldList = (payload.focusFields ?? []) as readonly string[]
+  // Diagnostic trace — every tier attempt pushes one entry so the admin
+  // panel + payload inspection can see exactly where the pipeline got
+  // stuck (initial whitelist empty? tier A DDG returned 0 URLs? tier B
+  // rate-limited?). Surfaced via `metadata.tierTrace` on the job row.
+  const tierTrace: Array<{
+    tier: 'initial' | 'tierA' | 'tierB'
+    urlsFound: number
+    fetched: number
+    extracted: boolean
+    accepted: boolean
+    note?: string
+  }> = [
+    {
+      tier: 'initial',
+      urlsFound: candidateUrls.length,
+      fetched: whitelistFetch.fetched.length,
+      extracted: extractionAttempt !== null,
+      accepted: extractionAttempt
+        ? extractionAddsValueOverCurrent(
+            extractionAttempt.result.figureData,
+            currentFigure,
+            focusFieldList,
+          )
+        : false,
+    },
+  ]
   const needsFallback =
     !extractionAttempt ||
     !extractionAddsValueOverCurrent(
@@ -1310,6 +1336,24 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
       log,
       'ddg-within-whitelist',
     )
+    tierTrace.push({
+      tier: 'tierA',
+      urlsFound: tierAUrls.length,
+      fetched:
+        tierA.kind === 'accepted'
+          ? tierA.fetched.length
+          : tierA.kind === 'no_match'
+            ? 0
+            : -1,
+      extracted: tierA.kind === 'accepted' || tierA.kind === 'failure',
+      accepted: tierA.kind === 'accepted',
+      note:
+        tierA.kind === 'rate_limited'
+          ? 'rate_limited'
+          : tierA.kind === 'failure'
+            ? tierA.failure.code
+            : undefined,
+    })
     const handleFallback = async (
       tier: FallbackTierResult,
     ): Promise<Response | { applied: true } | { applied: false }> => {
@@ -1366,6 +1410,24 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
         log,
         'ddg-salaf',
       )
+      tierTrace.push({
+        tier: 'tierB',
+        urlsFound: tierBUrls.length,
+        fetched:
+          tierB.kind === 'accepted'
+            ? tierB.fetched.length
+            : tierB.kind === 'no_match'
+              ? 0
+              : -1,
+        extracted: tierB.kind === 'accepted' || tierB.kind === 'failure',
+        accepted: tierB.kind === 'accepted',
+        note:
+          tierB.kind === 'rate_limited'
+            ? 'rate_limited'
+            : tierB.kind === 'failure'
+              ? tierB.failure.code
+              : undefined,
+      })
       const bOutcome = await handleFallback(tierB)
       if (bOutcome instanceof Response) return bOutcome
     }
@@ -1565,6 +1627,11 @@ async function handleFigureReIngest(jobId: string): Promise<Response> {
       fieldsChanged,
       citationsInserted: insertedCitationCount,
       modelUsed,
+      // Per-tier diagnostic so the admin panel + payload export can show
+      // which fallback stage produced the final source set. Helps debug
+      // "completed but suggestions empty" cases — see Bin Baz job
+      // `90955dcd-...` where every tier silently returned 0 usable URLs.
+      tierTrace,
     },
     suggestions,
     previous,
